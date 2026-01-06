@@ -27,7 +27,7 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -52,7 +52,7 @@ class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
               <button 
-                onClick={() => window.location.reload()}
+                onClick={() => this.setState({ hasError: false })}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
               >
                 <RefreshCw className="w-4 h-4" />

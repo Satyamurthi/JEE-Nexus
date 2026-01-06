@@ -6,21 +6,17 @@ import { NCERT_CHAPTERS } from "./constants";
 // Lazy initialization holder
 let ai: GoogleGenAI | null = null;
 
-// Fallback Key provided for immediate production stability
-const FALLBACK_KEY = "AIzaSyClRFHoBPQRJUgTelMxiLV7REaJkEtEkrY";
-
 // Helper to get env vars safely in Vite/Netlify/Node environments
 const getEnv = (key: string) => {
-  // 1. Check standard process.env (Node/Webpack/Netlify Build)
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key];
-  }
-  // 2. Check Vite import.meta.env
+  // 1. Check Vite import.meta.env (Primary for this stack)
   if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-    // Check direct key, VITE_ prefix, and REACT_APP_ prefix (legacy support)
     return (import.meta as any).env[key] || 
            (import.meta as any).env[`VITE_${key}`] || 
            (import.meta as any).env[`REACT_APP_${key}`];
+  }
+  // 2. Check standard process.env (Node/Webpack/Netlify Build)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
   }
   return '';
 };
@@ -28,12 +24,12 @@ const getEnv = (key: string) => {
 // Returns the shared AI client instance, initializing it on first use
 const getAI = () => {
     if (!ai) {
-        // Prioritize Environment Variable -> Fallback Hardcoded Key
-        const apiKey = getEnv('API_KEY') || FALLBACK_KEY;
+        // Prioritize Environment Variable
+        const apiKey = getEnv('API_KEY') || getEnv('VITE_API_KEY');
         
         if (!apiKey) {
-            console.error("Gemini API Key missing. Checked process.env.API_KEY, VITE_API_KEY, REACT_APP_API_KEY, and FALLBACK_KEY.");
-            throw new Error("API Key not configured. Please add 'VITE_API_KEY' or 'API_KEY' to your environment variables.");
+            console.error("Gemini API Key missing. Please set VITE_API_KEY in your .env file or Netlify settings.");
+            throw new Error("API Configuration Error: Key not found. Please check system settings.");
         }
         ai = new GoogleGenAI({ apiKey });
     }
@@ -50,9 +46,10 @@ const getModelConfig = () => {
 
 const config = getModelConfig();
 // Using recommended models based on task complexity
-const GEN_MODEL = config.genModel || "gemini-3-pro-preview";
-const VISION_MODEL = config.visionModel || "gemini-3-flash-preview";
-const ANALYSIS_MODEL = config.analysisModel || "gemini-3-pro-preview";
+// Fallback to gemini-2.0-flash as it is currently the most stable high-rate-limit model
+const GEN_MODEL = config.genModel || "gemini-2.0-flash"; 
+const VISION_MODEL = config.visionModel || "gemini-2.0-flash";
+const ANALYSIS_MODEL = config.analysisModel || "gemini-2.0-flash";
 
 // Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -108,16 +105,22 @@ const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
                             e.message?.includes('Quota') || 
                             e.message?.includes('RESOURCE_EXHAUSTED');
         
-        if (isRateLimit && retries > 0) {
-            console.warn(`Gemini Rate Limit Hit. Retrying in ${3 * (4 - retries)}s... (${retries} attempts left)`);
-            await delay(3000 * (4 - retries)); // 3s, 6s, 9s wait
+        // If quota exceeded or model not found (404 for exp models), try fallback
+        if ((isRateLimit || e.status === 404 || e.status === 503) && retries > 0) {
+            console.warn(`Gemini API Error (${e.status}). Retrying... (${retries} attempts left)`);
+            
+            await delay(2000 * (4 - retries)); // Backoff: 2s, 4s, 6s
+
+            // If it was the last retry or a specific hard error, switch to the most stable model
+            if (retries === 1 || e.status === 404) {
+                 const fallbackModel = 'gemini-2.0-flash';
+                 if (params.model !== fallbackModel) {
+                     console.warn(`Switching to stable fallback model: ${fallbackModel}`);
+                     return safeGenerateContent({ ...params, model: fallbackModel }, 0);
+                 }
+            }
+            
             return safeGenerateContent(params, retries - 1);
-        }
-        
-        // Model Fallback Strategy: If high-end model fails, try Flash Lite
-        if ((isRateLimit || e.status === 503) && retries === 0 && params.model !== 'gemini-2.0-flash-lite-preview-02-05') {
-             console.warn(`Model ${params.model} exhausted. Switching to Fallback: gemini-2.0-flash-lite-preview-02-05`);
-             return safeGenerateContent({ ...params, model: 'gemini-2.0-flash-lite-preview-02-05' }, 1);
         }
         
         throw e;
