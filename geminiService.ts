@@ -6,12 +6,30 @@ import { NCERT_CHAPTERS } from "./constants";
 // Lazy initialization holder
 let ai: GoogleGenAI | null = null;
 
+// Helper to get env vars safely in Vite/Netlify/Node environments
+const getEnv = (key: string) => {
+  // 1. Check standard process.env (Node/Webpack/Netlify Build)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  // 2. Check Vite import.meta.env
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    // Check direct key, VITE_ prefix, and REACT_APP_ prefix (legacy support)
+    return (import.meta as any).env[key] || 
+           (import.meta as any).env[`VITE_${key}`] || 
+           (import.meta as any).env[`REACT_APP_${key}`];
+  }
+  return '';
+};
+
 // Returns the shared AI client instance, initializing it on first use
 const getAI = () => {
     if (!ai) {
-        const apiKey = process.env.API_KEY;
+        const apiKey = getEnv('API_KEY');
+        
         if (!apiKey) {
-            throw new Error("API Key not found. Please configure the API_KEY environment variable.");
+            console.error("Gemini API Key missing. Checked process.env.API_KEY, VITE_API_KEY, REACT_APP_API_KEY.");
+            throw new Error("API Key not configured. Please add 'VITE_API_KEY' or 'API_KEY' to your environment variables.");
         }
         ai = new GoogleGenAI({ apiKey });
     }
@@ -368,7 +386,8 @@ export const parseDocumentToQuestions = async (
     }));
   } catch (error) {
     console.error("Parsing Failure:", error);
-    return [];
+    // Re-throw to allow UI to handle it
+    throw error;
   }
 };
 
