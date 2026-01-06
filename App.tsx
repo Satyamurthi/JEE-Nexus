@@ -19,7 +19,6 @@ const Login = React.lazy(() => import('./pages/Login'));
 const Signup = React.lazy(() => import('./pages/Signup'));
 
 interface ErrorBoundaryProps {
-  // Fixed: Made children optional to fix instantiation errors where TS fails to infer children from JSX contents
   children?: React.ReactNode;
 }
 
@@ -28,12 +27,8 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fixed: Explicitly defining state and props to resolve TypeScript inference errors where inherited members are not recognized
 class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';

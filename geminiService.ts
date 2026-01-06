@@ -92,6 +92,38 @@ const cleanAndParseJSON = (text: string) => {
   }
 };
 
+// Helper for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Wrapper for API calls with automatic retry logic for 429 errors.
+ */
+const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
+    const aiInstance = getAI();
+    try {
+        return await aiInstance.models.generateContent(params);
+    } catch (e: any) {
+        const isRateLimit = e.status === 429 || 
+                            e.message?.includes('429') || 
+                            e.message?.includes('Quota') || 
+                            e.message?.includes('RESOURCE_EXHAUSTED');
+        
+        if (isRateLimit && retries > 0) {
+            console.warn(`Gemini Rate Limit Hit. Retrying in ${3 * (4 - retries)}s... (${retries} attempts left)`);
+            await delay(3000 * (4 - retries)); // 3s, 6s, 9s wait
+            return safeGenerateContent(params, retries - 1);
+        }
+        
+        // Model Fallback Strategy: If high-end model fails, try Flash Lite
+        if ((isRateLimit || e.status === 503) && retries === 0 && params.model !== 'gemini-2.0-flash-lite-preview-02-05') {
+             console.warn(`Model ${params.model} exhausted. Switching to Fallback: gemini-2.0-flash-lite-preview-02-05`);
+             return safeGenerateContent({ ...params, model: 'gemini-2.0-flash-lite-preview-02-05' }, 1);
+        }
+        
+        throw e;
+    }
+};
+
 // Define response schema using Type from @google/genai
 const questionSchema = {
   type: Type.ARRAY,
@@ -122,8 +154,7 @@ const questionSchema = {
 
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
-    const aiInstance = getAI();
-    const response = await aiInstance.models.generateContent({
+    const response = await safeGenerateContent({
       model: GEN_MODEL,
       contents: `Provide a single, very short conceptual hint (max 15 words) for this ${subject} question. Do NOT solve it. Do NOT give formulas. Just the starting concept. Question: ${statement.substring(0, 300)}...`
     });
@@ -136,8 +167,7 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 
 export const refineQuestionText = async (text: string): Promise<string> => {
   try {
-    const aiInstance = getAI();
-    const response = await aiInstance.models.generateContent({
+    const response = await safeGenerateContent({
       model: GEN_MODEL,
       contents: `Fix grammar and clarity of this JEE question text. Keep LaTeX math ($...$) intact. Text: ${text}`
     });
@@ -228,8 +258,7 @@ export const generateJEEQuestions = async (
   ];
 
   try {
-    const aiInstance = getAI();
-    const response = await aiInstance.models.generateContent({
+    const response = await safeGenerateContent({
       model: GEN_MODEL,
       contents: prompt,
       config: {
@@ -355,8 +384,8 @@ export const parseDocumentToQuestions = async (
   ];
 
   try {
-    const aiInstance = getAI();
-    const response = await aiInstance.models.generateContent({
+    // Attempting to use the safer wrapper for document parsing
+    const response = await safeGenerateContent({
       model: VISION_MODEL,
       contents: {
         parts: [
@@ -397,9 +426,8 @@ export const parseDocumentToQuestions = async (
 
 export const getDeepAnalysis = async (result: any) => {
     try {
-        const aiInstance = getAI();
         const prompt = `Analyze these JEE mock results: ${JSON.stringify(result)}. Provide deep pedagogical feedback.`;
-        const response = await aiInstance.models.generateContent({
+        const response = await safeGenerateContent({
             model: ANALYSIS_MODEL,
             contents: prompt
         });

@@ -1,6 +1,6 @@
 
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = 'nexus-v3.1-core'; // Updated version
+const CACHE_NAME = 'nexus-v3.2-patch'; // Updated version
 const PRE_CACHE_RESOURCES = [
   '/',
   '/index.html',
