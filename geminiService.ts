@@ -6,6 +6,9 @@ import { NCERT_CHAPTERS } from "./constants";
 // Lazy initialization holder
 let ai: GoogleGenAI | null = null;
 
+// Fallback Key provided for immediate production stability
+const FALLBACK_KEY = "AIzaSyClRFHoBPQRJUgTelMxiLV7REaJkEtEkrY";
+
 // Helper to get env vars safely in Vite/Netlify/Node environments
 const getEnv = (key: string) => {
   // 1. Check standard process.env (Node/Webpack/Netlify Build)
@@ -25,10 +28,11 @@ const getEnv = (key: string) => {
 // Returns the shared AI client instance, initializing it on first use
 const getAI = () => {
     if (!ai) {
-        const apiKey = getEnv('API_KEY');
+        // Prioritize Environment Variable -> Fallback Hardcoded Key
+        const apiKey = getEnv('API_KEY') || FALLBACK_KEY;
         
         if (!apiKey) {
-            console.error("Gemini API Key missing. Checked process.env.API_KEY, VITE_API_KEY, REACT_APP_API_KEY.");
+            console.error("Gemini API Key missing. Checked process.env.API_KEY, VITE_API_KEY, REACT_APP_API_KEY, and FALLBACK_KEY.");
             throw new Error("API Key not configured. Please add 'VITE_API_KEY' or 'API_KEY' to your environment variables.");
         }
         ai = new GoogleGenAI({ apiKey });
