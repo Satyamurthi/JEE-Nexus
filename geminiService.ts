@@ -3,11 +3,18 @@ import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/gen
 import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
 import { NCERT_CHAPTERS } from "./constants";
 
-// Initialize AI client with environment variable API Key
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization holder
+let ai: GoogleGenAI | null = null;
 
-// Returns the shared AI client instance
+// Returns the shared AI client instance, initializing it on first use
 const getAI = () => {
+    if (!ai) {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) {
+            throw new Error("API Key not found. Please configure the API_KEY environment variable.");
+        }
+        ai = new GoogleGenAI({ apiKey });
+    }
     return ai;
 };
 
@@ -93,8 +100,8 @@ const questionSchema = {
 
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
+    const aiInstance = getAI();
+    const response = await aiInstance.models.generateContent({
       model: GEN_MODEL,
       contents: `Provide a single, very short conceptual hint (max 15 words) for this ${subject} question. Do NOT solve it. Do NOT give formulas. Just the starting concept. Question: ${statement.substring(0, 300)}...`
     });
@@ -107,8 +114,8 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 
 export const refineQuestionText = async (text: string): Promise<string> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
+    const aiInstance = getAI();
+    const response = await aiInstance.models.generateContent({
       model: GEN_MODEL,
       contents: `Fix grammar and clarity of this JEE question text. Keep LaTeX math ($...$) intact. Text: ${text}`
     });
@@ -199,8 +206,8 @@ export const generateJEEQuestions = async (
   ];
 
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
+    const aiInstance = getAI();
+    const response = await aiInstance.models.generateContent({
       model: GEN_MODEL,
       contents: prompt,
       config: {
@@ -326,8 +333,8 @@ export const parseDocumentToQuestions = async (
   ];
 
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
+    const aiInstance = getAI();
+    const response = await aiInstance.models.generateContent({
       model: VISION_MODEL,
       contents: {
         parts: [
@@ -367,9 +374,9 @@ export const parseDocumentToQuestions = async (
 
 export const getDeepAnalysis = async (result: any) => {
     try {
-        const ai = getAI();
+        const aiInstance = getAI();
         const prompt = `Analyze these JEE mock results: ${JSON.stringify(result)}. Provide deep pedagogical feedback.`;
-        const response = await ai.models.generateContent({
+        const response = await aiInstance.models.generateContent({
             model: ANALYSIS_MODEL,
             contents: prompt
         });

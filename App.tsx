@@ -31,13 +31,8 @@ interface ErrorBoundaryState {
 
 // Fixed: Explicitly defining state and props to resolve TypeScript inference errors where inherited members are not recognized
 class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // Explicit declarations to satisfy the compiler's inheritance checks
-  public state: ErrorBoundaryState;
-  public props: ErrorBoundaryProps;
-
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.props = props;
     this.state = { hasError: false };
   }
 
