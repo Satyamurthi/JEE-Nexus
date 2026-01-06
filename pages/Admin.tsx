@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Plus, RefreshCw, Search, UserCheck, UserX, Loader2, Users, Crown, Mail, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, ExternalLink, CloudOff, Activity, MoreHorizontal, X, Save, Eye, EyeOff, CheckCircle2, ChevronDown, UserPlus, Database, Calendar, CalendarClock, RotateCcw, Medal, FileUp, FileText, AlertTriangle, ArrowRight, XCircle, Key, Lock, Server, Sparkles, Sliders, Atom, Beaker, FunctionSquare, Layers, Cpu, Dices, Printer, Download, Terminal, FileSpreadsheet } from 'lucide-react';
 import { getAllProfiles, updateProfileStatus, deleteProfile, saveQuestionsToDB, supabase, getAllDailyChallenges, createDailyChallenge, seedMockData, getDailyAttempts } from '../supabase';
@@ -8,9 +7,7 @@ import { NCERT_CHAPTERS } from '../constants';
 import { Subject, QuestionType, Difficulty, ExamType } from '../types';
 import MathText from '../components/MathText';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
-// ... (previous imports and interfaces remain the same)
 type UserStatus = 'all' | 'pending' | 'approved' | 'rejected';
 
 interface SubjectConfig {
@@ -25,8 +22,6 @@ interface GenerationConfig {
   chemistry: SubjectConfig;
   mathematics: SubjectConfig;
 }
-
-// --- Custom Components ---
 
 const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel }: any) => {
   if (!isOpen) return null;
@@ -174,7 +169,7 @@ WHERE email = 'name@admin.com';
                     <p className="text-blue-200 text-sm font-bold">How to apply:</p>
                     <ol className="text-blue-300/80 text-sm list-decimal pl-4 space-y-1">
                         <li>Copy the SQL above.</li>
-                        <li>Go to Supabase Dashboard -> <strong>SQL Editor</strong> -> New Query.</li>
+                        <li>Go to Supabase Dashboard → <strong>SQL Editor</strong> → New Query.</li>
                         <li>Paste and Click <strong>Run</strong>.</li>
                         <li><strong>Log Out</strong> and Log In with <code>name@admin.com</code> / <code>admin123</code>.</li>
                     </ol>
@@ -203,7 +198,6 @@ const ToastNotification = ({ message, type, onClose }: any) => {
   );
 };
 
-// ... (Rest of Admin.tsx remains unchanged)
 const SubjectConfigModal = ({ 
     isOpen, 
     onClose, 
@@ -217,7 +211,6 @@ const SubjectConfigModal = ({
     config: SubjectConfig; 
     onUpdate: (newConfig: SubjectConfig) => void;
 }) => {
-    // ... (same as before)
     const chapters = NCERT_CHAPTERS[subject as keyof typeof NCERT_CHAPTERS] || [];
     const [localChapters, setLocalChapters] = useState<string[]>(config.chapters);
     const [localTopics, setLocalTopics] = useState<string[]>(config.topics);
@@ -349,11 +342,8 @@ const SubjectConfigModal = ({
     );
 };
 
-// --- Main Admin Component ---
-
 const Admin = () => {
   const navigate = useNavigate();
-  // ... (existing state)
   const [activeTab, setActiveTab] = useState('Daily Paper Upload');
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -370,7 +360,6 @@ const Admin = () => {
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [showSqlFix, setShowSqlFix] = useState(false);
 
-  // ... (rest of state vars)
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({message: msg, type});
   const closeConfirm = () => setConfirmState(prev => ({ ...prev, isOpen: false }));
   
@@ -430,12 +419,10 @@ const Admin = () => {
     }
   }, [activeTab, analysisDate]);
 
-  // NEW: Warn user if in View-Only Local Admin Mode
   const [isLocalAdminMode, setIsLocalAdminMode] = useState(false);
   useEffect(() => {
       if (loggedInProfile.id && loggedInProfile.id.startsWith('admin-root-')) {
           if (supabase) {
-              // If connected to Supabase but using local admin, assume view only
               setIsLocalAdminMode(true);
           }
       }
@@ -459,7 +446,6 @@ const Admin = () => {
     }
   };
 
-  // ... (existing helper functions)
   const loadAnalysis = async () => {
       setLoadingAnalysis(true);
       try {
@@ -604,7 +590,6 @@ const Admin = () => {
         showToast("Pop-up blocked. Please allow pop-ups to download PDF.", 'error');
         return;
     }
-    // ... (print logic same as before)
     let qHtml = '';
     let sHtml = '';
     sortedQuestions.forEach((q, idx) => {
@@ -694,11 +679,9 @@ const Admin = () => {
     }
   };
 
-  // UPDATED STATUS CHANGE HANDLER
   const handleStatusChange = async (userId: string, status: 'approved' | 'rejected' | 'pending') => {
     setActionLoading(userId);
     
-    // Check local admin issue first
     if (isLocalAdminMode) {
         showToast("Operation Denied: You are in View-Only Local Admin Mode. To approve users, please Log Out and log in with your Supabase credentials.", 'error');
         setActionLoading(null);
@@ -708,14 +691,11 @@ const Admin = () => {
     const error = await updateProfileStatus(userId, status);
     
     if (!error) {
-      // Optimistic Update
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, status } : u));
       showToast(`User status updated to ${status}`);
-      // Re-fetch to confirm sync
       setTimeout(() => loadUsers(), 500); 
     } else {
       showToast(error, 'error');
-      // Detect Permission Error
       if (typeof error === 'string' && (error.includes('policy') || error.includes('permission') || error.includes('42501') || error.includes('Permission'))) {
           setShowSqlFix(true);
       }
@@ -813,7 +793,6 @@ const Admin = () => {
                         <Terminal className="w-4 h-4" /> Database Repair Script
                     </button>
                  </div>
-                 {/* ... (existing system settings JSX) */}
                  <div className="space-y-8 max-w-2xl">
                     <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-xl flex gap-3 text-yellow-800 text-sm">
                         <AlertTriangle className="w-5 h-5 shrink-0" />
@@ -866,7 +845,6 @@ const Admin = () => {
         </div>
       )}
 
-      {/* Rest of the component ... (Daily Paper Upload & User Management tabs) */}
       {activeTab === 'Daily Paper Upload' && (
         <div className="space-y-8">
            {activeConfigSubject && (
@@ -970,7 +948,6 @@ const Admin = () => {
                       )}
                     </AnimatePresence>
 
-                    {/* ... (rest of daily upload JSX) ... */}
                     <div className="relative flex py-2 items-center">
                         <div className="flex-grow border-t border-slate-200"></div>
                         <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase">OR Upload PDF</span>
@@ -1075,6 +1052,137 @@ const Admin = () => {
                        </button>
                     </div>
                  )}
+              </div>
+           </div>
+        </div>
+      )}
+
+      {activeTab === 'Daily Challenges' && (
+        <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
+             <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                   <Calendar className="w-6 h-6 text-blue-600" />
+                   Published Challenges
+                </h3>
+             </div>
+             <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                      <th className="px-8 py-5">Date</th>
+                      <th className="px-8 py-5">Questions</th>
+                      <th className="px-8 py-5">Created At</th>
+                      <th className="px-8 py-5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {dailyPapers.length > 0 ? dailyPapers.map((paper, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-8 py-6 font-bold text-slate-900">{paper.date}</td>
+                        <td className="px-8 py-6 text-sm text-slate-600">{paper.questions?.length || 0} Questions</td>
+                        <td className="px-8 py-6 text-xs text-slate-400">{new Date(paper.created_at).toLocaleString()}</td>
+                        <td className="px-8 py-6 text-right">
+                           <button onClick={() => { setUploadDate(paper.date); setParsedQuestions(paper.questions); setActiveTab('Daily Paper Upload'); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><RefreshCw className="w-4 h-4" /></button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={4} className="px-8 py-20 text-center text-slate-400 font-medium">No challenges published yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+             </div>
+        </div>
+      )}
+
+      {activeTab === 'Result Analysis' && (
+        <div className="space-y-6">
+           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="flex items-center gap-4">
+                 <div className="p-3 bg-blue-100 text-blue-600 rounded-xl"><Calendar className="w-6 h-6" /></div>
+                 <div>
+                    <h3 className="text-xl font-black text-slate-900">Performance Matrix</h3>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Aggregate results per session</p>
+                 </div>
+              </div>
+              <div className="flex items-center gap-4">
+                 <input 
+                    type="date" 
+                    value={analysisDate} 
+                    onChange={(e) => setAnalysisDate(e.target.value)} 
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" 
+                 />
+                 <button onClick={handlePrintAnalysis} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all">
+                    <Printer className="w-4 h-4" /> Print Report
+                 </button>
+              </div>
+           </div>
+
+           <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden" ref={printRef}>
+              <div className="overflow-x-auto">
+                 <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                        <tr>
+                            <th rowSpan={2} className="px-4 py-5 border-r border-slate-100">Rank</th>
+                            <th rowSpan={2} className="px-6 py-5 border-r border-slate-100">Identity</th>
+                            <th colSpan={4} className="px-6 py-5 text-center border-r border-slate-100 bg-blue-50/50 text-blue-600">Physics</th>
+                            <th colSpan={4} className="px-6 py-5 text-center border-r border-slate-100 bg-emerald-50/50 text-emerald-600">Chemistry</th>
+                            <th colSpan={4} className="px-6 py-5 text-center border-r border-slate-100 bg-fuchsia-50/50 text-fuchsia-600">Mathematics</th>
+                            <th rowSpan={2} className="px-6 py-5 border-r border-slate-100">Neg</th>
+                            <th rowSpan={2} className="px-6 py-5 border-r border-slate-100">Unatt</th>
+                            <th rowSpan={2} className="px-8 py-5 text-center bg-slate-900 text-white">Total</th>
+                        </tr>
+                        <tr>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">C</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">W</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">NA</th>
+                            <th className="px-4 py-3 text-center border-r border-slate-100">Sc</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">C</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">W</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">NA</th>
+                            <th className="px-4 py-3 text-center border-r border-slate-100">Sc</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">C</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">W</th>
+                            <th className="px-2 py-3 text-center border-r border-slate-100">NA</th>
+                            <th className="px-4 py-3 text-center border-r border-slate-100">Sc</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                        {loadingAnalysis ? (
+                            <tr><td colSpan={20} className="px-8 py-20 text-center text-slate-400 font-medium">Computing Results...</td></tr>
+                        ) : analysisData.length > 0 ? analysisData.map((row, i) => (
+                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-4 py-4 text-center border-r border-slate-100 font-black">{row.rank}</td>
+                                <td className="px-6 py-4 border-r border-slate-100">
+                                    <div className="flex flex-col">
+                                        <span className="font-black text-slate-900">{row.name}</span>
+                                        <span className="text-[9px] text-slate-400">{row.regNo}</span>
+                                    </div>
+                                </td>
+                                {/* Physics */}
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-emerald-600 font-bold">{row.stats.Physics.C}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-red-600">{row.stats.Physics.W}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-slate-400">{row.stats.Physics.NA}</td>
+                                <td className="px-4 py-4 text-center border-r border-slate-100 bg-blue-50/30 font-black">{row.stats.Physics.Score}</td>
+                                {/* Chemistry */}
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-emerald-600 font-bold">{row.stats.Chemistry.C}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-red-600">{row.stats.Chemistry.W}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-slate-400">{row.stats.Chemistry.NA}</td>
+                                <td className="px-4 py-4 text-center border-r border-slate-100 bg-emerald-50/30 font-black">{row.stats.Chemistry.Score}</td>
+                                {/* Mathematics */}
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-emerald-600 font-bold">{row.stats.Mathematics.C}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-red-600">{row.stats.Mathematics.W}</td>
+                                <td className="px-2 py-4 text-center border-r border-slate-100 text-slate-400">{row.stats.Mathematics.NA}</td>
+                                <td className="px-4 py-4 text-center border-r border-slate-100 bg-fuchsia-50/30 font-black">{row.stats.Mathematics.Score}</td>
+                                
+                                <td className="px-6 py-4 text-center border-r border-slate-100 text-red-700 font-bold">-{row.stats.Neg}</td>
+                                <td className="px-6 py-4 text-center border-r border-slate-100 text-slate-500">{row.stats.Unatt}</td>
+                                <td className="px-8 py-4 text-center bg-slate-50 font-black text-sm text-slate-900">{row.total}</td>
+                            </tr>
+                        )) : (
+                            <tr><td colSpan={20} className="px-8 py-20 text-center text-slate-400 font-medium">No attempts recorded for this date.</td></tr>
+                        )}
+                    </tbody>
+                 </table>
               </div>
            </div>
         </div>

@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold, Schema } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
 import { NCERT_CHAPTERS } from "./constants";
 
@@ -20,9 +20,10 @@ const getModelConfig = () => {
 };
 
 const config = getModelConfig();
-const GEN_MODEL = config.genModel || "gemini-3-flash-preview";
-const VISION_MODEL = config.visionModel || "gemini-2.0-flash-exp";
-const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
+// Using recommended models based on task complexity
+const GEN_MODEL = config.genModel || "gemini-3-pro-preview";
+const VISION_MODEL = config.visionModel || "gemini-3-flash-preview";
+const ANALYSIS_MODEL = config.analysisModel || "gemini-3-pro-preview";
 
 // Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -62,15 +63,16 @@ const cleanAndParseJSON = (text: string) => {
   }
 };
 
-const questionSchema: Schema = {
+// Define response schema using Type from @google/genai
+const questionSchema = {
   type: Type.ARRAY,
   items: {
     type: Type.OBJECT,
     properties: {
       subject: { type: Type.STRING },
       chapter: { type: Type.STRING },
-      type: { type: Type.STRING, enum: ["MCQ", "Numerical"] },
-      difficulty: { type: Type.STRING, enum: ["Easy", "Medium", "Hard"] },
+      type: { type: Type.STRING },
+      difficulty: { type: Type.STRING },
       statement: { type: Type.STRING },
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
       correctAnswer: { type: Type.STRING },
@@ -96,6 +98,7 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
       model: GEN_MODEL,
       contents: `Provide a single, very short conceptual hint (max 15 words) for this ${subject} question. Do NOT solve it. Do NOT give formulas. Just the starting concept. Question: ${statement.substring(0, 300)}...`
     });
+    // Property access .text
     return response.text || "Recall basic principles.";
   } catch (e) {
     return "Check your concepts.";
@@ -109,6 +112,7 @@ export const refineQuestionText = async (text: string): Promise<string> => {
       model: GEN_MODEL,
       contents: `Fix grammar and clarity of this JEE question text. Keep LaTeX math ($...$) intact. Text: ${text}`
     });
+    // Property access .text
     return response.text || text;
   } catch (e) {
     return text;
@@ -206,6 +210,7 @@ export const generateJEEQuestions = async (
       }
     });
 
+    // Property access .text
     const text = response.text;
     if (!text) throw new Error("Empty response from AI");
 
@@ -323,7 +328,7 @@ export const parseDocumentToQuestions = async (
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: VISION_MODEL, // Keep using 2.0-flash for vision as it's multimodal optimized
+      model: VISION_MODEL,
       contents: {
         parts: [
           ...parts,
@@ -336,6 +341,7 @@ export const parseDocumentToQuestions = async (
       }
     });
 
+    // Property access .text
     const data = cleanAndParseJSON(response.text);
     const questions = Array.isArray(data) ? data : [];
     
@@ -367,6 +373,7 @@ export const getDeepAnalysis = async (result: any) => {
             model: ANALYSIS_MODEL,
             contents: prompt
         });
+        // Property access .text
         return response.text || "Summary not available.";
     } catch (e) {
         return "Analysis failed.";

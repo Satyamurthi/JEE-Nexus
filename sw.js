@@ -1,44 +1,45 @@
-
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = 'jee-nexus-v2-cache-first';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'nexus-v3-core';
+const PRE_CACHE_RESOURCES = [
   '/',
   '/index.html',
+  '/manifest.json',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap',
   'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css',
-  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js',
-  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js'
+  'https://esm.sh/react@^19.2.3',
+  'https://esm.sh/react-dom@^19.2.3'
 ];
 
-// Domains that should be cached aggressively (Cache First)
-const CACHE_DOMAINS = [
+const AGGRESSIVE_CACHE_HOSTS = [
   'esm.sh',
   'cdn.tailwindcss.com',
   'fonts.googleapis.com',
   'fonts.gstatic.com',
-  'cdn.jsdelivr.net'
+  'cdn.jsdelivr.net',
+  'cdn-icons-png.flaticon.com'
 ];
 
-// Install: Cache core static assets immediately
+// Installation phase: Lock in core shell
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('Opened cache, pre-fetching static assets');
-      return cache.addAll(STATIC_ASSETS);
+      console.log('[Nexus SW] Pre-caching Core Shell');
+      return cache.addAll(PRE_CACHE_RESOURCES);
     })
   );
 });
 
-// Activate: Clean up old caches
+// Activation phase: Purge legacy layers
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
+    caches.keys().then((keys) => {
       return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            console.log('[Nexus SW] Purging obsolete cache:', key);
+            return caches.delete(key);
           }
         })
       );
@@ -47,83 +48,72 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: The Core Logic for "Any Speed" Loading
+// Intelligent Fetch strategy: Network Speed Agnostic
 self.addEventListener('fetch', (event) => {
-  const requestUrl = new URL(event.request.url);
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // 1. API Calls / Supabase: Network First (Fresh data is priority)
-  if (requestUrl.pathname.includes('/rest/v1/') || requestUrl.hostname.includes('supabase.co') || requestUrl.hostname.includes('googleapis.com')) {
+  // 1. Skip non-GET and local/private requests
+  if (request.method !== 'GET') return;
+
+  // 2. Data/API Policy: Network First, Fallback to Cache
+  const isDataRequest = url.hostname.includes('supabase.co') || 
+                        url.hostname.includes('googleapis.com');
+  
+  if (isDataRequest) {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then((response) => {
-          // Optional: Cache successful GET API responses for offline viewing if needed
-          // For now, keeping it strictly network first for data integrity
+          // If successful, cache it for offline redundancy
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
           return response;
         })
-        .catch(() => {
-          // If offline, try to find a cached match if we implemented API caching
-          return caches.match(event.request);
-        })
+        .catch(() => caches.match(request))
     );
     return;
   }
 
-  // 2. External CDNs (Libraries/Fonts): Cache First
-  // Once downloaded, we trust the cache forever (until version change in URL)
-  if (CACHE_DOMAINS.some(domain => requestUrl.hostname.includes(domain))) {
+  // 3. Static/Asset Policy: Cache First, Revalidate in background (SWR)
+  const isCdnAsset = AGGRESSIVE_CACHE_HOSTS.some(host => url.hostname.includes(host));
+  
+  if (isCdnAsset || PRE_CACHE_RESOURCES.includes(url.pathname)) {
     event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(event.request).then((networkResponse) => {
-          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'cors' && networkResponse.type !== 'basic') {
-            return networkResponse;
+      caches.match(request).then((cached) => {
+        const networkFetch = fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
           }
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-          return networkResponse;
+          return response;
+        }).catch(() => {
+          // Silent fail - return cached if available
         });
+        
+        return cached || networkFetch;
       })
     );
     return;
   }
 
-  // 3. App Shell / Navigation: Stale-While-Revalidate
-  // Serve cached index.html immediately, update in background
-  if (event.request.mode === 'navigate') {
+  // 4. Navigation/App-Shell Policy: Stale-While-Revalidate
+  if (request.mode === 'navigate') {
     event.respondWith(
-      caches.match('/index.html').then((cachedResponse) => {
-        const fetchPromise = fetch(event.request).then((networkResponse) => {
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put('/index.html', networkResponse.clone());
-          });
-          return networkResponse;
-        });
-        return cachedResponse || fetchPromise;
+      caches.match('/index.html').then((cached) => {
+        const networkFetch = fetch(request).then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
+          return response;
+        }).catch(() => cached);
+        
+        return cached || networkFetch;
       })
     );
     return;
   }
 
-  // 4. Default: Stale-While-Revalidate
+  // 5. Default: Cache Match or Network
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        // Cache valid responses
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      }).catch((err) => {
-          // Network failed, nothing to do if not in cache
-      });
-      return cachedResponse || fetchPromise;
-    })
+    caches.match(request).then(cached => cached || fetch(request))
   );
 });

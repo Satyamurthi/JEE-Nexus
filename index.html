@@ -17,86 +17,35 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://esm.sh">
 
+    <!-- Optimized Script Loading -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     
     <!-- KaTeX for Math Rendering -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js" defer></script>
 
     <style>
         :root {
             --accent-indigo: #4f46e5;
-            --background-light: #f8fafc;
+            --background-light: #f1f5f9;
         }
+        /* Critical CSS to show shell immediately before Tailwind/JS loads */
         html, body, #root {
             height: 100%;
             margin: 0;
             padding: 0;
-            background-color: #f1f5f9;
+            background-color: var(--background-light);
             color: #0f172a;
-        }
-        body {
             font-family: 'Plus Jakarta Sans', sans-serif;
             -webkit-font-smoothing: antialiased;
             overflow-x: hidden;
         }
         
-        @keyframes blob {
-            0% { transform: translate(0px, 0px) scale(1); }
-            33% { transform: translate(30px, -50px) scale(1.1); }
-            66% { transform: translate(-20px, 20px) scale(0.9); }
-            100% { transform: translate(0px, 0px) scale(1); }
-        }
-        .animate-blob {
-            animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-            animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-            animation-delay: 4s;
-        }
-
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.65);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
-        }
-        
-        .glass-card-hover {
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-        }
-        .glass-card-hover:hover {
-            transform: translateY(-5px) scale(1.01);
-            background: rgba(255, 255, 255, 0.85);
-            box-shadow: 0 20px 40px -10px rgba(79, 70, 229, 0.15);
-            border-color: rgba(255, 255, 255, 0.8);
-        }
-
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: rgba(0,0,0,0.05);
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 20px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-        
-        .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
-        .katex { font-size: 1.1em; color: inherit; }
-
-        /* Initial Loader Styles */
+        /* Initial Loader UI */
         .initial-loader {
             position: fixed;
             top: 0;
@@ -109,45 +58,79 @@
             justify-content: center;
             background-color: #f8fafc;
             z-index: 9999;
-            transition: opacity 0.5s ease-out;
+            transition: opacity 0.4s ease-out;
         }
         .spinner {
-            width: 50px;
-            height: 50px;
+            width: 48px;
+            height: 48px;
             border: 4px solid #e2e8f0;
             border-top-color: #4f46e5;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s cubic-bezier(0.5, 0, 0.5, 1) infinite;
         }
         .loader-text {
-            margin-top: 20px;
-            font-family: sans-serif;
-            font-weight: 600;
-            color: #475569;
-            font-size: 14px;
-            letter-spacing: 1px;
+            margin-top: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            font-size: 13px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
             animation: pulse 2s infinite;
         }
-        .loader-actions {
-            margin-top: 20px;
+        .loader-sub {
+            margin-top: 8px;
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .loader-troubleshoot {
+            margin-top: 40px;
             display: none;
             flex-direction: column;
             align-items: center;
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
         }
         .reload-btn {
-            margin-top: 10px;
-            padding: 10px 20px;
-            background-color: #4f46e5;
+            margin-top: 12px;
+            padding: 10px 24px;
+            background-color: #0f172a;
             color: white;
             border: none;
-            border-radius: 8px;
-            font-weight: bold;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 12px;
             cursor: pointer;
-            font-family: sans-serif;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .animate-blob { animation: blob 7s infinite; }
+        @keyframes blob {
+            0% { transform: translate(0px, 0px) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+            100% { transform: translate(0px, 0px) scale(1); }
+        }
+        .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
     </style>
+
 <script type="importmap">
 {
   "imports": {
@@ -166,26 +149,32 @@
 </head>
 <body>
     <div id="root">
-        <!-- Immediate feedback while JS bundles load -->
+        <!-- Persistent loader shell -->
         <div class="initial-loader" id="app-loader">
             <div class="spinner"></div>
-            <div class="loader-text" id="loader-msg">INITIALIZING NEXUS AI...</div>
-            <div class="loader-actions" id="loader-actions">
-                <p style="font-family:sans-serif; font-size:12px; color:#64748b; text-align:center;">Network is slow. Initializing assets...</p>
-                <button class="reload-btn" onclick="window.location.reload()">Reload Resources</button>
+            <div class="loader-text" id="loader-msg">JEE NEXUS AI</div>
+            <div class="loader-sub">Initializing cognitive core...</div>
+            <div class="loader-troubleshoot" id="loader-troubleshoot">
+                <p style="font-size: 11px; color: #94a3b8; text-align: center; max-width: 200px;">Network seems unstable. We're trying to reconnect.</p>
+                <button class="reload-btn" onclick="window.location.reload()">RELOAD CORE</button>
             </div>
         </div>
     </div>
     <script>
-        // Fallback for very slow connections
-        setTimeout(() => {
-            const actions = document.getElementById('loader-actions');
-            const msg = document.getElementById('loader-msg');
-            if (actions && document.getElementById('app-loader')) {
-                actions.style.display = 'flex';
-                msg.textContent = "ESTABLISHING UPLINK...";
+        // Detection for extremely slow networks
+        window._bootTimer = setTimeout(() => {
+            const troubleshoot = document.getElementById('loader-troubleshoot');
+            if (troubleshoot && document.getElementById('app-loader')) {
+                troubleshoot.style.display = 'flex';
+                document.getElementById('loader-msg').textContent = "OPTIMIZING LINK";
             }
-        }, 8000); // Show retry button after 8 seconds
+        }, 6000); 
+
+        // Fast path for clearing loader
+        window.addEventListener('DOMContentLoaded', () => {
+           // We keep the loader until the main JS says otherwise
+           console.log('DOM Content Loaded - Core components ready');
+        });
     </script>
     <script type="module" src="index.tsx"></script>
 </body>
