@@ -1,10 +1,9 @@
 
-import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold, Schema } from "@google/genai";
 import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
 import { NCERT_CHAPTERS } from "./constants";
 
-// FIX: Adhere to API key guidelines by initializing directly with process.env.API_KEY.
-// Initialize AI client
+// Initialize AI client with environment variable API Key
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Returns the shared AI client instance
@@ -41,45 +40,52 @@ const fileToBase64 = (file: File): Promise<string> => {
 
 /**
  * Robust JSON cleaner and parser specifically for LLM-generated JSON containing LaTeX.
- * LLMs often fail to escape backslashes correctly in JSON strings.
  */
 const cleanAndParseJSON = (text: string) => {
   if (!text) return null;
 
-  // 1. Remove Markdown code blocks
+  // 1. Remove Markdown code blocks if any
   let cleanText = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
-  // 2. Locate the outermost JSON array or object
-  const firstOpenBracket = cleanText.indexOf('[');
-  const firstOpenBrace = cleanText.indexOf('{');
-  const lastCloseBracket = cleanText.lastIndexOf(']');
-  const lastCloseBrace = cleanText.lastIndexOf('}');
-
-  const start = (firstOpenBracket !== -1 && (firstOpenBrace === -1 || firstOpenBracket < firstOpenBrace)) ? firstOpenBracket : firstOpenBrace;
-  const end = (lastCloseBracket !== -1 && (lastCloseBrace === -1 || lastCloseBracket > lastCloseBrace)) ? lastCloseBracket : lastCloseBrace;
-
-  if (start !== -1 && end !== -1) {
-    cleanText = cleanText.substring(start, end + 1);
-  }
-
   try {
     // Attempt standard parse first
     return JSON.parse(cleanText);
   } catch (e) {
-    console.warn("Standard JSON parse failed, attempting LaTeX-resilient sanitization...", e);
-    
+    // Attempt cleanup if standard parse fails
     let sanitized = cleanText;
-
-    // Regex to handle backslashes more safely
-    sanitized = sanitized.replace(/\\(u[\da-fA-F]{4}|[^"\\/bfnrtu])/g, '\\\\$1');
-
     try {
-      const result = JSON.parse(sanitized);
-      return result;
+        return JSON.parse(sanitized);
     } catch (e2) {
-      console.error("Advanced sanitization failed. JSON Text Snippet:", sanitized.substring(0, 300));
-      return null;
+        console.warn("JSON Parse failed:", e2);
+        return null;
     }
+  }
+};
+
+const questionSchema: Schema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      subject: { type: Type.STRING },
+      chapter: { type: Type.STRING },
+      type: { type: Type.STRING, enum: ["MCQ", "Numerical"] },
+      difficulty: { type: Type.STRING, enum: ["Easy", "Medium", "Hard"] },
+      statement: { type: Type.STRING },
+      options: { type: Type.ARRAY, items: { type: Type.STRING } },
+      correctAnswer: { type: Type.STRING },
+      solution: { type: Type.STRING },
+      explanation: { type: Type.STRING },
+      concept: { type: Type.STRING },
+      markingScheme: {
+         type: Type.OBJECT,
+         properties: {
+             positive: { type: Type.INTEGER },
+             negative: { type: Type.INTEGER }
+         }
+      }
+    },
+    required: ["subject", "statement", "correctAnswer", "solution", "type"]
   }
 };
 
@@ -114,7 +120,7 @@ export const generateJEEQuestions = async (
   count: number,
   type: ExamType,
   chapters?: string[],
-  difficulty?: Difficulty,
+  difficulty?: string | Difficulty,
   topics?: string[],
   distribution?: { mcq: number, numerical: number }
 ): Promise<Question[]> => {
@@ -131,65 +137,54 @@ export const generateJEEQuestions = async (
 
   const isFullSyllabus = !chapters || chapters.length === 0;
 
-  let topicFocus = "Cover a diverse range of high-weightage topics from the full Class 11 and 12 NCERT syllabus";
+  let topicFocus = "Cover high-weightage topics from Class 11 and 12 NCERT syllabus. Focus on complex applications.";
   
   if (!isFullSyllabus) {
     // Advanced Topic Focus Generation
-    // We map each selected chapter to either "Any Topic" or "Specific Topics"
     const subjectChapters = NCERT_CHAPTERS[subject] || [];
     
     const constraints = chapters.map(chap => {
         const chapDef = subjectChapters.find(c => c.name === chap);
-        // If we can't find definitions, default to whole chapter
-        if (!chapDef) return `- Chapter: ${chap} (Focus: Balanced Mix of All Topics)`;
+        if (!chapDef) return `- Chapter: "${chap}" (Focus: Multi-concept linking)`;
 
-        // Find which topics from this chapter are selected
         const selectedTopicsForChap = chapDef.topics.filter(t => topics?.includes(t));
         
         if (selectedTopicsForChap.length > 0) {
-            // Specific topics selected
-            return `- Chapter: ${chap} (STRICTLY RESTRICT to topics: ${selectedTopicsForChap.join(', ')})`;
+            return `- Chapter: "${chap}" (STRICTLY RESTRICT to topics: ${selectedTopicsForChap.join(', ')})`;
         } else {
-            // No specific topics selected -> Random/Mixed for this chapter
-            return `- Chapter: ${chap} (Focus: Random Balanced Mix of Topics)`;
+            return `- Chapter: "${chap}" (Focus: Deep Conceptual Depth)`;
         }
     });
 
     topicFocus = `
         Generate questions strictly distributed among the following chapters with specific constraints:
         ${constraints.join('\n')}
-        
-        Note: If a chapter specifies "Random Balanced Mix", choose diverse concepts from that chapter. 
-        If it specifies "STRICTLY RESTRICT", do not step outside those topics.
     `;
   }
 
+  // UPDATED PROMPT FOR HIGHER DIFFICULTY - EXACT JEE ADVANCED SPEC
   const prompt = `
-    Act as a strict JEE Exam Database.
-    Generate a JSON Array of exactly ${count} ${subject} questions for ${type}.
+    Act as the Chief Paper Setter for JEE Advanced (IIT-JEE).
+    Your task is to generate exactly ${count} questions of "JEE Advanced" standard for the subject: ${subject}.
     
     Target Scope: ${topicFocus}
-    Difficulty Level: ${difficulty || 'JEE Standard'}
-    Format: ${mcqCount} MCQs (Single Correct) and ${numericalCount} Numerical Value Questions.
+    Difficulty Profile: 100% HARD to EXTREME. (No Board level or Main level questions).
+    Structure: ${mcqCount} Single/Multi Correct MCQs and ${numericalCount} Numerical Value Type (Integer/Decimal).
 
-    Output Rules:
-    1. Return ONLY the JSON Array. No markdown formatting (no \`\`\`json).
-    2. Use LaTeX for all mathematical expressions enclosed in $.
-    3. CRITICAL: Escape all backslashes in strings. Use \\\\ instead of \\.
-       Example: "\\\\frac{1}{2}" instead of "\\frac{1}{2}".
-    
-    JSON Object Schema:
-    {
-      "subject": "${subject}",
-      "chapter": "${chapters && chapters.length > 0 ? chapters.join(', ') : 'Mixed Syllabus'}",
-      "type": "MCQ" or "Numerical",
-      "statement": "Question text...",
-      "options": ["A", "B", "C", "D"], // Empty for Numerical
-      "correctAnswer": "0" (index for MCQ) or "Value" (for Numerical),
-      "solution": "Step-by-step solution...",
-      "explanation": "Concept explanation...",
-      "markingScheme": { "positive": 4, "negative": 1 }
-    }
+    STRICT GUIDELINES FOR "JEE ADVANCED" LEVEL:
+    1. MULTI-CONCEPTUAL: Every question must merge at least two distinct concepts (e.g., Rotation + Magnetism, Thermodynamics + SHM, Probability + Complex Numbers, Organic Mechanism + Stoichiometry).
+    2. NO DIRECT FORMULAS: Questions must require deriving a relation, calculus-based analysis, or visualizing a complex physical situation.
+    3. NUMERICALS: Must be calculation-intensive or require precise logic. Answers can be integers (0-9) or decimals to 2 places.
+    4. PHYSICS: Use non-inertial frames, variable mass, constraint relations (rod/wedge), RLC transients, or wave optics with interference.
+    5. CHEMISTRY: Focus on reaction mechanisms with stereochemistry (R/S, E/Z), complex buffer/solubility cases, or crystal field splitting with magnetic moments.
+    6. MATHS: Use calculus with inequalities, vector 3D involving skew lines/planes, or probability involving Bayes theorem mixed with P&C.
+
+    OUTPUT FORMAT RULES:
+    1. Return strictly valid JSON array.
+    2. Use LaTeX for ALL math expressions, enclosed in single dollar signs $. 
+    3. ESCAPE BACKSLASHES in LaTeX string literals (e.g., use "\\\\alpha" for \\alpha, "\\\\frac" for \\frac). This is critical for JSON parsing.
+    4. For 'Numerical' type, set "options": [].
+    5. markingScheme: {"positive": 4, "negative": 1} for MCQ, {"positive": 4, "negative": 0} for Numerical.
   `;
 
   const safetySettings = [
@@ -206,15 +201,19 @@ export const generateJEEQuestions = async (
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        responseSchema: questionSchema,
         safetySettings: safetySettings,
       }
     });
 
-    const data = cleanAndParseJSON(response.text);
+    const text = response.text;
+    if (!text) throw new Error("Empty response from AI");
+
+    const data = cleanAndParseJSON(text);
     return Array.isArray(data) ? data : [];
   } catch (error: any) {
-    console.error("Gemini Generation Failure:", error);
-    throw error;
+    console.error(`Gemini Generation Failure for ${subject}:`, error);
+    return [];
   }
 };
 
@@ -233,46 +232,52 @@ interface FullGenerationConfig {
 
 export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Generate each subject in parallel to ensure granular control logic is respected per subject
-    const [physicsQuestions, chemistryQuestions, mathematicsQuestions] = await Promise.all([
+    // Use Promise.allSettled to ensure partial results are returned even if one subject fails
+    const results = await Promise.allSettled([
         generateJEEQuestions(
             Subject.Physics, 
             config.physics.mcq + config.physics.numerical, 
-            ExamType.Main, 
+            ExamType.Advanced, 
             config.physics.chapters, 
-            Difficulty.Medium, 
+            Difficulty.Hard, 
             config.physics.topics,
             { mcq: config.physics.mcq, numerical: config.physics.numerical }
         ),
         generateJEEQuestions(
             Subject.Chemistry, 
             config.chemistry.mcq + config.chemistry.numerical, 
-            ExamType.Main, 
+            ExamType.Advanced, 
             config.chemistry.chapters, 
-            Difficulty.Medium, 
+            Difficulty.Hard, 
             config.chemistry.topics,
             { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical }
         ),
         generateJEEQuestions(
             Subject.Mathematics, 
             config.mathematics.mcq + config.mathematics.numerical, 
-            ExamType.Main, 
+            ExamType.Advanced, 
             config.mathematics.chapters, 
-            Difficulty.Medium, 
+            Difficulty.Hard, 
             config.mathematics.topics,
             { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical }
         )
     ]);
 
+    // Helper to safely extract value
+    const getResult = (index: number) => {
+        const res = results[index];
+        return res.status === 'fulfilled' ? res.value : [];
+    };
+
     return {
-        physics: physicsQuestions,
-        chemistry: chemistryQuestions,
-        mathematics: mathematicsQuestions
+        physics: getResult(0),
+        chemistry: getResult(1),
+        mathematics: getResult(2)
     };
 
   } catch (error: any) {
-    console.error("Full Paper Generation Failure:", error);
-    throw error;
+    console.error("Full Paper Generation Critical Failure:", error);
+    return { physics: [], chemistry: [], mathematics: [] };
   }
 };
 

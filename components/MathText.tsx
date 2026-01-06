@@ -3,77 +3,95 @@ import React, { useMemo } from 'react';
 interface MathTextProps {
   text: string;
   className?: string;
+  isBlock?: boolean;
 }
 
 /**
  * Robust MathText component that manually parses and renders LaTeX using KaTeX.
  * Optimized with useMemo to prevent unnecessary re-renders.
- * Supports $...$, $$...$$, \(...\), and \[...\] delimiters.
- * Handles escaped backslashes from JSON and mhchem \ce{} commands.
+ * Supports $...$, $$...$$, \(...\), \[...\], and generic \begin{env}...\end{env} blocks.
  */
-const MathText: React.FC<MathTextProps> = ({ text, className }) => {
+const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false }) => {
   const htmlContent = useMemo(() => {
     if (!text) return '';
 
     const katex = (window as any).katex;
-    // Fallback if KaTeX isn't loaded (e.g. network error on CDN)
+    // Fallback if KaTeX isn't loaded
     if (!katex) {
         return text.replace(/\n/g, '<br/>');
     }
 
     try {
-      // Common LaTeX/LLM cleanup:
-      // Replace double backslashes that might be escaped in JSON (\\ -> \)
-      // This is crucial because Gemini JSON output often escapes backslashes (e.g. \\frac)
-      let sanitizedText = text.replace(/\\\\/g, '\\');
+      // 1. Normalize line breaks
+      let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // Split text by math delimiters: 
+      // 2. Fix common AI latex escape issues, but be careful not to break matrices (\\)
+      // We only fix specific command patterns that might be double escaped by accident
+      // e.g. \\( -> \(
+      sanitizedText = sanitizedText.replace(/\\\\\[/g, '\\[').replace(/\\\\\]/g, '\\]');
+      sanitizedText = sanitizedText.replace(/\\\\\(/g, '\\(').replace(/\\\\\)/g, '\\)');
+      // Do NOT globally replace \\ with \ as it breaks newline logic in tables/matrices
+
+      // 3. Regex to split content by math delimiters
+      // Captures:
       // $$...$$ (Display)
-      // $...$ (Inline)
       // \[...\] (Display)
+      // \begin{env}...\end{env} (Display/Block) - Matches any environment
+      // $...$ (Inline)
       // \(...\) (Inline)
-      const parts = sanitizedText.split(/(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]|\\\(.*?\\\))/gs);
+      const regex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\begin\{[a-zA-Z0-9*]+\}[\s\S]*?\\end\{[a-zA-Z0-9*]+\})|(?:\$[\s\S]*?\$)|(?:\\\([\s\S]*?\\\)))/g;
+      
+      const parts = sanitizedText.split(regex);
       
       return parts.map((part) => {
         if (!part) return '';
         
-        // Default options for KaTeX
-        const renderOptions = {
-             throwOnError: false, 
-             trust: true, // Allows \ce and other macros
-             strict: false,
-             globalGroup: true
-        };
+        // Determine if this part is a math block
+        const isDisplayMath = 
+          (part.startsWith('$$') && part.endsWith('$$')) ||
+          (part.startsWith('\\[') && part.endsWith('\\]')) ||
+          (part.startsWith('\\begin') && part.endsWith('}')); 
 
-        try {
-          // Display Math $$...$$
-          if (part.startsWith('$$') && part.endsWith('$$')) {
-            const formula = part.slice(2, -2);
-            return katex.renderToString(formula, { ...renderOptions, displayMode: true });
-          } 
-          // Inline Math $...$
-          else if (part.startsWith('$') && part.endsWith('$')) {
-            const formula = part.slice(1, -1);
-            return katex.renderToString(formula, { ...renderOptions, displayMode: false });
-          }
-          // Display Math \[...\]
-          else if (part.startsWith('\\[') && part.endsWith('\\]')) {
-            const formula = part.slice(2, -2);
-            return katex.renderToString(formula, { ...renderOptions, displayMode: true });
-          }
-          // Inline Math \(...\)
-          else if (part.startsWith('\\(') && part.endsWith('\\)')) {
-            const formula = part.slice(2, -2);
-            return katex.renderToString(formula, { ...renderOptions, displayMode: false });
-          }
-        } catch (katexErr) {
-          console.warn("KaTeX render error for part:", part, katexErr);
-          // Fallback: return the raw LaTeX code if rendering fails
-          return `<span class="text-red-500 font-mono text-xs" title="${String(katexErr)}">${part}</span>`;
+        const isInlineMath = 
+          (part.startsWith('$') && part.endsWith('$')) ||
+          (part.startsWith('\\(') && part.endsWith('\\)'));
+
+        if (isDisplayMath || isInlineMath) {
+            let content = part;
+            // Strip standard delimiters for processing (KaTeX doesn't need them if we specify displayMode)
+            // However, we MUST keep \begin...\end wrapping for environments.
+            
+            if (part.startsWith('$$')) content = part.slice(2, -2);
+            else if (part.startsWith('\\[')) content = part.slice(2, -2);
+            else if (part.startsWith('$')) content = part.slice(1, -1);
+            else if (part.startsWith('\\(')) content = part.slice(2, -2);
+            
+            // Common options
+            const renderOptions = {
+                 throwOnError: false, 
+                 trust: true, 
+                 strict: false,
+                 displayMode: isDisplayMath || isBlock,
+                 globalGroup: true,
+                 macros: {
+                    "\\RR": "\\mathbb{R}",
+                    "\\NN": "\\mathbb{N}",
+                    "\\ZZ": "\\mathbb{Z}",
+                    "\\QQ": "\\mathbb{Q}",
+                    "\\CC": "\\mathbb{C}"
+                 }
+            };
+
+            try {
+                return katex.renderToString(content, renderOptions);
+            } catch (katexErr) {
+                console.warn("KaTeX render error:", katexErr);
+                // Fallback: simple text display of the code
+                return `<span class="text-red-500 font-mono text-xs break-all" title="Render Error">${part}</span>`;
+            }
         }
         
         // Plain Text - escape HTML and handle newlines
-        // We do NOT process LaTeX here, only plain text surrounding it
         return part
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
@@ -81,14 +99,14 @@ const MathText: React.FC<MathTextProps> = ({ text, className }) => {
           .replace(/\n/g, '<br />');
       }).join('');
     } catch (e) {
-      console.warn("Math rendering error:", e);
+      console.warn("Math processing error:", e);
       return text.replace(/\n/g, '<br/>');
     }
-  }, [text]);
+  }, [text, isBlock]);
 
   return (
     <div 
-      className={className} 
+      className={`math-content prose prose-slate max-w-none ${className || ''}`} 
       dangerouslySetInnerHTML={{ __html: htmlContent }} 
     />
   );

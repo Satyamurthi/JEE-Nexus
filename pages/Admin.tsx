@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Shield, Plus, RefreshCw, Search, UserCheck, UserX, Loader2, Users, Crown, Mail, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, ExternalLink, CloudOff, Activity, MoreHorizontal, X, Save, Eye, EyeOff, CheckCircle2, ChevronDown, UserPlus, Database, Calendar, CalendarClock, RotateCcw, Medal, FileUp, FileText, AlertTriangle, ArrowRight, XCircle, Key, Lock, Server, Sparkles, Sliders, Atom, Beaker, FunctionSquare, Layers, Cpu } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Shield, Plus, RefreshCw, Search, UserCheck, UserX, Loader2, Users, Crown, Mail, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, ExternalLink, CloudOff, Activity, MoreHorizontal, X, Save, Eye, EyeOff, CheckCircle2, ChevronDown, UserPlus, Database, Calendar, CalendarClock, RotateCcw, Medal, FileUp, FileText, AlertTriangle, ArrowRight, XCircle, Key, Lock, Server, Sparkles, Sliders, Atom, Beaker, FunctionSquare, Layers, Cpu, Dices, Printer, Download, Terminal, FileSpreadsheet } from 'lucide-react';
 import { getAllProfiles, updateProfileStatus, deleteProfile, saveQuestionsToDB, supabase, getAllDailyChallenges, createDailyChallenge, seedMockData, getDailyAttempts } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +10,7 @@ import MathText from '../components/MathText';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
+// ... (previous imports and interfaces remain the same)
 type UserStatus = 'all' | 'pending' | 'approved' | 'rejected';
 
 interface SubjectConfig {
@@ -25,6 +26,184 @@ interface GenerationConfig {
   mathematics: SubjectConfig;
 }
 
+// --- Custom Components ---
+
+const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-2xl scale-100 border border-slate-100">
+        <h3 className="text-xl font-black text-slate-900 mb-3">{title}</h3>
+        <p className="text-slate-500 font-medium mb-8 leading-relaxed text-sm">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onCancel} className="px-6 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors">Cancel</button>
+          <button onClick={onConfirm} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-xs hover:bg-slate-800 shadow-lg transition-all">Confirm</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SqlFixDialog = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (!isOpen) return null;
+  
+  const sqlCode = `-- 1. Enable Crypto Extension (Required for password reset)
+create extension if not exists pgcrypto;
+
+-- 2. Fix Permissions (RLS)
+alter table daily_challenges enable row level security;
+alter table daily_attempts enable row level security;
+alter table profiles enable row level security;
+
+-- Policies (Drop & Recreate to ensure correctness)
+drop policy if exists "Public Read Daily" on daily_challenges;
+create policy "Public Read Daily" on daily_challenges for select using (true);
+
+drop policy if exists "Public Insert Daily" on daily_challenges;
+create policy "Public Insert Daily" on daily_challenges for insert with check (true);
+
+drop policy if exists "Public Update Daily" on daily_challenges;
+create policy "Public Update Daily" on daily_challenges for update using (true);
+
+drop policy if exists "Users can insert own attempts" on daily_attempts;
+create policy "Users can insert own attempts" on daily_attempts for insert with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view own attempts" on daily_attempts;
+create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
+
+drop policy if exists "Admins view all attempts" on daily_attempts;
+create policy "Admins view all attempts" on daily_attempts for select using ( 
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+create policy "Public profiles are viewable by everyone" on profiles for select using (true);
+
+drop policy if exists "Users can update own profile" on profiles;
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+drop policy if exists "Admins can update all profiles" on profiles;
+create policy "Admins can update all profiles" on profiles for update using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- 3. Auto-Create Profile Trigger
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, role, status)
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- 4. FORCE SYNC: Fix Missing Profiles for Existing Users
+INSERT INTO public.profiles (id, email, full_name, role, status)
+SELECT id, email, raw_user_meta_data->>'full_name', 'student', 'pending'
+FROM auth.users
+ON CONFLICT (id) DO NOTHING;
+
+-- 5. CRITICAL: Fix Admin User (name@admin.com)
+-- This resets the password to 'admin123' if the user exists
+UPDATE auth.users
+SET 
+    encrypted_password = crypt('admin123', gen_salt('bf')),
+    email_confirmed_at = now(),
+    raw_user_meta_data = jsonb_set(COALESCE(raw_user_meta_data, '{}'::jsonb), '{full_name}', '"System Admin"')
+WHERE email = 'name@admin.com';
+
+-- 6. Grant Admin Role
+UPDATE public.profiles
+SET role = 'admin', status = 'approved'
+WHERE email = 'name@admin.com';
+
+-- NOTE: If you still cannot login, the user 'name@admin.com' does not exist.
+-- Please go to the Signup page and create it first.`;
+
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+      navigator.clipboard.writeText(sqlCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
+      <div className="bg-slate-950 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[90vh]">
+        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
+            <h3 className="text-xl font-bold text-red-400 flex items-center gap-3">
+                <ShieldAlert className="w-6 h-6" /> Comprehensive Database Repair
+            </h3>
+            <button onClick={onClose}><X className="text-slate-400 hover:text-white" /></button>
+        </div>
+        <div className="p-8 overflow-y-auto custom-scrollbar">
+            <p className="text-slate-300 mb-6 leading-relaxed">
+                Run this script to fix <strong>Invalid Credentials</strong> or <strong>View Only</strong> mode.<br/>
+                It performs a hard reset on the admin account settings in the database.
+                <ul className="list-disc list-inside mt-2 text-slate-400 text-sm space-y-1">
+                    <li className="text-yellow-400">Resets 'name@admin.com' password to 'admin123'</li>
+                    <li>Auto-confirms email address (Fixes Login)</li>
+                    <li>Restores Admin permissions</li>
+                    <li>Fixes Row Level Security (RLS)</li>
+                </ul>
+            </p>
+            <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                <Terminal className="w-4 h-4" /> SQL Solution
+            </div>
+            <div className="bg-black rounded-xl p-6 border border-slate-800 relative group">
+                <pre className="text-green-400 font-mono text-sm overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                    {sqlCode}
+                </pre>
+                <button 
+                    onClick={handleCopy} 
+                    className="absolute top-4 right-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 border border-slate-700"
+                >
+                    {copied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                    {copied ? 'Copied' : 'Copy SQL'}
+                </button>
+            </div>
+            <div className="mt-6 flex gap-4 items-start p-4 bg-blue-900/20 border border-blue-900/50 rounded-xl">
+                <Database className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                    <p className="text-blue-200 text-sm font-bold">How to apply:</p>
+                    <ol className="text-blue-300/80 text-sm list-decimal pl-4 space-y-1">
+                        <li>Copy the SQL above.</li>
+                        <li>Go to Supabase Dashboard -> <strong>SQL Editor</strong> -> New Query.</li>
+                        <li>Paste and Click <strong>Run</strong>.</li>
+                        <li><strong>Log Out</strong> and Log In with <code>name@admin.com</code> / <code>admin123</code>.</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+        <div className="p-6 border-t border-slate-800 bg-slate-900 flex justify-end">
+            <button onClick={onClose} className="px-8 py-3 bg-white text-slate-950 font-bold rounded-xl hover:bg-slate-200 transition-colors">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ToastNotification = ({ message, type, onClose }: any) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 6000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-[100] px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-10 fade-in duration-300 border ${type === 'error' ? 'bg-red-50 text-red-900 border-red-200' : 'bg-slate-900 text-white border-slate-800'}`}>
+       {type === 'error' ? <AlertTriangle className="w-5 h-5 shrink-0 text-red-600" /> : <CheckCircle2 className="w-5 h-5 shrink-0 text-green-400" />}
+       <span className="font-bold text-sm max-w-xs">{message}</span>
+    </div>
+  );
+};
+
+// ... (Rest of Admin.tsx remains unchanged)
 const SubjectConfigModal = ({ 
     isOpen, 
     onClose, 
@@ -38,13 +217,11 @@ const SubjectConfigModal = ({
     config: SubjectConfig; 
     onUpdate: (newConfig: SubjectConfig) => void;
 }) => {
+    // ... (same as before)
     const chapters = NCERT_CHAPTERS[subject as keyof typeof NCERT_CHAPTERS] || [];
-    
-    // Internal state to manage selections before saving
     const [localChapters, setLocalChapters] = useState<string[]>(config.chapters);
     const [localTopics, setLocalTopics] = useState<string[]>(config.topics);
 
-    // Sync when opening
     useEffect(() => {
         if(isOpen) {
             setLocalChapters(config.chapters);
@@ -56,8 +233,6 @@ const SubjectConfigModal = ({
         const newChapters = localChapters.includes(chapName) 
             ? localChapters.filter(c => c !== chapName)
             : [...localChapters, chapName];
-        
-        // Remove topics if chapter deselected
         if (!newChapters.includes(chapName)) {
             const chapTopics = chapters.find(c => c.name === chapName)?.topics || [];
             setLocalTopics(prev => prev.filter(t => !chapTopics.includes(t)));
@@ -76,6 +251,18 @@ const SubjectConfigModal = ({
     const handleClearTopics = (chapTopics: string[]) => {
         setLocalTopics(prev => prev.filter(t => !chapTopics.includes(t)));
     };
+    
+    const handleRandomize = () => {
+        const shuffled = [...chapters].sort(() => 0.5 - Math.random());
+        const selectedChaps = shuffled.slice(0, 3).map(c => c.name);
+        const selectedTops: string[] = [];
+        shuffled.slice(0, 3).forEach(c => {
+             const randomTopic = c.topics[Math.floor(Math.random() * c.topics.length)];
+             if (randomTopic) selectedTops.push(randomTopic);
+        });
+        setLocalChapters(selectedChaps);
+        setLocalTopics(selectedTops);
+    };
 
     const handleSave = () => {
         onUpdate({ ...config, chapters: localChapters, topics: localTopics });
@@ -89,7 +276,7 @@ const SubjectConfigModal = ({
             <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }} 
                 animate={{ opacity: 1, scale: 1 }} 
-                className="bg-white rounded-[2rem] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
+                className="bg-white rounded-[2rem] w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
             >
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
                     <div>
@@ -97,9 +284,14 @@ const SubjectConfigModal = ({
                            <Sliders className="w-5 h-5 text-blue-600" />
                            Configure {subject}
                         </h3>
-                        <p className="text-xs font-bold text-slate-500 mt-1">Select Chapters & Topics for Generation</p>
+                        <p className="text-xs font-bold text-slate-500 mt-1">Select Chapters & Topics for Granular Generation</p>
                     </div>
-                    <button onClick={onClose} className="p-2 bg-slate-200 rounded-full text-slate-500 hover:bg-slate-300"><X className="w-5 h-5" /></button>
+                    <div className="flex items-center gap-2">
+                         <button onClick={handleRandomize} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-indigo-100 flex items-center gap-2">
+                            <Dices className="w-4 h-4" /> Randomize
+                         </button>
+                         <button onClick={onClose} className="p-2 bg-slate-200 rounded-full text-slate-500 hover:bg-slate-300"><X className="w-5 h-5" /></button>
+                    </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
@@ -114,15 +306,21 @@ const SubjectConfigModal = ({
                                         </div>
                                         <span className={`font-bold ${isChapSelected ? 'text-blue-900' : 'text-slate-600'}`}>{chap.name}</span>
                                     </div>
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">{chap.topics.length} Topics</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">{chap.topics.length} Topics</span>
+                                        {isChapSelected && (
+                                            <span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-black rounded uppercase">Active</span>
+                                        )}
+                                    </div>
                                 </div>
-                                
                                 {isChapSelected && (
-                                    <div className="p-4 border-t border-blue-100 bg-white rounded-b-xl">
+                                    <div className="p-4 border-t border-blue-100 bg-white rounded-b-xl animate-in fade-in">
                                         <div className="flex items-center gap-3 mb-3">
                                             <span className="text-[10px] font-black uppercase text-slate-400">Selection Mode:</span>
-                                            <button onClick={() => handleSelectAllTopics(chap.topics)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold rounded">All Topics</button>
-                                            <button onClick={() => handleClearTopics(chap.topics)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold rounded">Random Mix</button>
+                                            <button onClick={() => handleSelectAllTopics(chap.topics)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold rounded">Select All</button>
+                                            <button onClick={() => handleClearTopics(chap.topics)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold rounded flex items-center gap-1">
+                                                <Dices className="w-3 h-3" /> Random Mix
+                                            </button>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             {chap.topics.map(topic => (
@@ -144,22 +342,45 @@ const SubjectConfigModal = ({
 
                 <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
                     <button onClick={onClose} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-200 transition-colors">Cancel</button>
-                    <button onClick={handleSave} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg hover:bg-blue-700 transition-all">Save Configuration</button>
+                    <button onClick={handleSave} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg hover:bg-blue-700 transition-all">Save & Apply</button>
                 </div>
             </motion.div>
         </div>
     );
 };
 
+// --- Main Admin Component ---
+
 const Admin = () => {
   const navigate = useNavigate();
+  // ... (existing state)
   const [activeTab, setActiveTab] = useState('Daily Paper Upload');
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [dailyPapers, setDailyPapers] = useState<any[]>([]);
   
-  // Daily Paper Upload State
-  const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
+  const [analysisDate, setAnalysisDate] = useState<string>('');
+  const [analysisData, setAnalysisData] = useState<any[]>([]);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const [confirmState, setConfirmState] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void}>({
+      isOpen: false, title: '', message: '', onConfirm: () => {}
+  });
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [showSqlFix, setShowSqlFix] = useState(false);
+
+  // ... (rest of state vars)
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({message: msg, type});
+  const closeConfirm = () => setConfirmState(prev => ({ ...prev, isOpen: false }));
+  
+  const getLocalToday = () => {
+      const d = new Date();
+      return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+  };
+
+  useEffect(() => { setAnalysisDate(getLocalToday()); }, []);
+  const [uploadDate, setUploadDate] = useState(getLocalToday());
   const [qFile, setQFile] = useState<File | null>(null);
   const [sFile, setSFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -168,9 +389,8 @@ const Admin = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [genStatus, setGenStatus] = useState("");
-  const [showGenConfig, setShowGenConfig] = useState(false);
+  const [showGenConfig, setShowGenConfig] = useState(true);
   
-  // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [activeConfigSubject, setActiveConfigSubject] = useState<string | null>(null);
 
@@ -180,21 +400,12 @@ const Admin = () => {
     mathematics: { mcq: 4, numerical: 1, chapters: [], topics: [] },
   });
 
-  // Key Management State
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
-
-  // Model Config State
   const [genModel, setGenModel] = useState('');
   const [analysisModel, setAnalysisModel] = useState('');
   const [visionModel, setVisionModel] = useState('');
 
-  // Leaderboard State
-  const [viewingAttemptsDate, setViewingAttemptsDate] = useState<string | null>(null);
-  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
-  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
-  
-  // General State
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [dbError, setDbError] = useState<any>(null);
   const [userFilter, setUserFilter] = useState<UserStatus>('all');
@@ -206,6 +417,7 @@ const Admin = () => {
   useEffect(() => {
     if (activeTab === 'User Management') loadUsers();
     if (activeTab === 'Daily Challenges' || activeTab === 'Daily Paper Upload') loadDailyPapers();
+    if (activeTab === 'Result Analysis') loadAnalysis();
     if (activeTab === 'System Settings') {
         const customSupabase = JSON.parse(localStorage.getItem('custom_supabase_config') || '{}');
         setSupabaseUrl(customSupabase.url || '');
@@ -216,7 +428,18 @@ const Admin = () => {
         setAnalysisModel(customModels.analysisModel || 'gemini-3-flash-preview');
         setVisionModel(customModels.visionModel || 'gemini-2.0-flash-exp');
     }
-  }, [activeTab]);
+  }, [activeTab, analysisDate]);
+
+  // NEW: Warn user if in View-Only Local Admin Mode
+  const [isLocalAdminMode, setIsLocalAdminMode] = useState(false);
+  useEffect(() => {
+      if (loggedInProfile.id && loggedInProfile.id.startsWith('admin-root-')) {
+          if (supabase) {
+              // If connected to Supabase but using local admin, assume view only
+              setIsLocalAdminMode(true);
+          }
+      }
+  }, [loggedInProfile]);
 
   const loadUsers = async () => {
     setLoadingUsers(true);
@@ -236,45 +459,110 @@ const Admin = () => {
     }
   };
 
+  // ... (existing helper functions)
+  const loadAnalysis = async () => {
+      setLoadingAnalysis(true);
+      try {
+          const attempts = await getDailyAttempts(analysisDate);
+          const processed = attempts.map((attempt, index) => {
+              const data = attempt.attempt_data || [];
+              const stats = {
+                  Physics: { C: 0, W: 0, NA: 0, Score: 0 },
+                  Chemistry: { C: 0, W: 0, NA: 0, Score: 0 },
+                  Mathematics: { C: 0, W: 0, NA: 0, Score: 0 },
+                  Neg: 0,
+                  Unatt: 0
+              };
+              data.forEach((q: any) => {
+                  const subj = q.subject as 'Physics' | 'Chemistry' | 'Mathematics';
+                  if (!stats[subj]) return;
+                  if (q.isCorrect) {
+                      stats[subj].C++;
+                      stats[subj].Score += (q.markingScheme?.positive || 4);
+                  } else if (q.userAnswer !== undefined && q.userAnswer !== '' && q.userAnswer !== null) {
+                      stats[subj].W++;
+                      const neg = (q.markingScheme?.negative || 1);
+                      stats[subj].Score -= neg;
+                      stats.Neg += neg;
+                  } else {
+                      stats[subj].NA++;
+                      stats.Unatt++;
+                  }
+              });
+              return {
+                  rank: index + 1,
+                  name: attempt.user_name || attempt.user_email?.split('@')[0]?.toUpperCase() || 'UNKNOWN',
+                  regNo: attempt.user_id.substring(0, 8).toUpperCase(),
+                  comb: 'PCM', 
+                  stats,
+                  total: attempt.score
+              };
+          });
+          setAnalysisData(processed);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLoadingAnalysis(false);
+      }
+  };
+
   const loadDailyPapers = async () => {
     const papers = await getAllDailyChallenges();
     setDailyPapers(papers);
   };
   
+  const handlePrintAnalysis = () => {
+      const printWindow = window.open('', '', 'height=800,width=1200');
+      if (printWindow && printRef.current) {
+          printWindow.document.write('<!DOCTYPE html><html><head><title>Exam Analysis Report</title>');
+          printWindow.document.write('<style>body{font-family: sans-serif; padding: 20px;} table{width:100%; border-collapse:collapse; font-size: 10px;} th, td{border: 1px solid #000; padding: 4px; text-align: center;} th{background: #f0f0f0;} h2, h3{text-align:center;}</style>');
+          printWindow.document.write('</head><body>');
+          printWindow.document.write(`<h2>JEE NEXUS - DAILY EXAM REPORT</h2><h3>DATE: ${analysisDate}</h3>`);
+          printWindow.document.write(printRef.current.innerHTML);
+          printWindow.document.write('</body></html>');
+          printWindow.document.close();
+          setTimeout(() => printWindow.print(), 500);
+      }
+  };
+  
   const handleSaveKeys = () => {
-    if (confirm("Saving these settings will reload the application to apply changes. Continue?")) {
-        if (supabaseUrl && supabaseKey) {
-            localStorage.setItem('custom_supabase_config', JSON.stringify({ url: supabaseUrl, key: supabaseKey }));
-        } else {
-            localStorage.removeItem('custom_supabase_config');
+    setConfirmState({
+        isOpen: true,
+        title: 'Save & Reload?',
+        message: 'Saving these settings will trigger a page reload to apply changes. Do you want to proceed?',
+        onConfirm: () => {
+            closeConfirm();
+            if (supabaseUrl && supabaseKey) {
+                localStorage.setItem('custom_supabase_config', JSON.stringify({ url: supabaseUrl, key: supabaseKey }));
+            } else {
+                localStorage.removeItem('custom_supabase_config');
+            }
+            localStorage.setItem('nexus_model_config', JSON.stringify({
+                genModel: genModel || 'gemini-3-flash-preview',
+                analysisModel: analysisModel || 'gemini-3-flash-preview',
+                visionModel: visionModel || 'gemini-2.0-flash-exp'
+            }));
+            window.location.reload();
         }
-
-        localStorage.setItem('nexus_model_config', JSON.stringify({
-            genModel: genModel || 'gemini-3-flash-preview',
-            analysisModel: analysisModel || 'gemini-3-flash-preview',
-            visionModel: visionModel || 'gemini-2.0-flash-exp'
-        }));
-
-        window.location.reload();
-    }
+    });
   };
 
   const handleParseDocument = async () => {
     if (!qFile) {
-      alert("Please upload the Question Paper PDF/Image first.");
+      showToast("Please upload the Question Paper PDF/Image first.", 'error');
       return;
     }
-    
     setIsParsing(true);
     setParseError(null);
     setParsedQuestions([]);
-
     try {
       const questions = await parseDocumentToQuestions(qFile, sFile || undefined);
       if (!questions || questions.length === 0) throw new Error("No questions extracted. Check image clarity.");
       setParsedQuestions(questions);
+      showToast(`Successfully parsed ${questions.length} questions!`);
     } catch (e: any) {
       setParseError(e.message);
+      showToast(e.message, 'error');
     } finally {
       setIsParsing(false);
     }
@@ -283,13 +571,9 @@ const Admin = () => {
   const handleGenConfigCountsChange = (subject: keyof GenerationConfig, type: 'mcq' | 'numerical', value: string) => {
     const numValue = parseInt(value, 10);
     if (isNaN(numValue) || numValue < 0 || numValue > 50) return;
-
     setGenerationConfig(prev => ({
         ...prev,
-        [subject]: {
-            ...prev[subject],
-            [type]: numValue
-        }
+        [subject]: { ...prev[subject], [type]: numValue }
     }));
   };
   
@@ -306,114 +590,158 @@ const Admin = () => {
       }));
   };
 
+  const handleDownloadPDF = () => {
+    if (parsedQuestions.length === 0) {
+        showToast("No questions to download.", 'error');
+        return;
+    }
+    const sortedQuestions = [...parsedQuestions].sort((a, b) => {
+        const order = { 'Physics': 1, 'Chemistry': 2, 'Mathematics': 3 };
+        return (order[a.subject as keyof typeof order] || 4) - (order[b.subject as keyof typeof order] || 4);
+    });
+    const printWindow = window.open('', '', 'height=800,width=900');
+    if (!printWindow) {
+        showToast("Pop-up blocked. Please allow pop-ups to download PDF.", 'error');
+        return;
+    }
+    // ... (print logic same as before)
+    let qHtml = '';
+    let sHtml = '';
+    sortedQuestions.forEach((q, idx) => {
+        qHtml += `<div class="question-block"><div class="q-header"><span class="q-num">Q${idx + 1}.</span><span class="q-meta">${q.subject} (${q.type})</span></div><div class="q-statement">${q.statement.replace(/\n/g, '<br/>')}</div>${q.type === 'MCQ' && q.options ? `<div class="q-options">${q.options.map((opt: string, i: number) => `<div class="q-option"><span class="opt-label">${String.fromCharCode(65 + i)})</span><span class="opt-text">${opt}</span></div>`).join('')}</div>` : ''}</div>`;
+        sHtml += `<div class="solution-block"><div class="s-header"><strong>Q${idx + 1}.</strong> <span class="correct-ans">Correct Answer: ${q.correctAnswer}</span></div><div class="s-concept"><strong>Concept:</strong> ${q.concept}</div><div class="s-body"><strong>Explanation:</strong><br/>${q.solution ? q.solution.replace(/\n/g, '<br/>') : q.explanation.replace(/\n/g, '<br/>')}</div></div>`;
+    });
+    const fullHtml = `<!DOCTYPE html><html><head><title>JEE Nexus Paper - ${uploadDate}</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script><style>body { font-family: 'Times New Roman', serif; padding: 40px; max-width: 900px; mx-auto; } h1, h2, h3 { text-align: center; } .section-break { page-break-before: always; border-top: 2px dashed #ccc; margin-top: 40px; padding-top: 40px; } .question-block, .solution-block { margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 20px; } .q-header, .s-header { margin-bottom: 8px; font-weight: bold; } .q-meta { font-size: 0.8em; color: #666; margin-left: 10px; text-transform: uppercase; } .q-statement { margin-bottom: 12px; font-size: 1.1em; line-height: 1.5; } .q-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; } .q-option { display: flex; gap: 8px; } .opt-label { font-weight: bold; } .correct-ans { color: #008000; margin-left: 10px; } .s-concept { font-style: italic; color: #444; margin-bottom: 5px; font-size: 0.9em; } .s-body { background: #f9f9f9; padding: 10px; border-radius: 5px; font-size: 0.95em; line-height: 1.4; } @media print { body { padding: 0; } .no-print { display: none; } }</style></head><body><h1>JEE Nexus AI - Daily Practice Paper</h1><h3>Date: ${uploadDate} | Total Questions: ${sortedQuestions.length}</h3><hr/><h2>Part A: Question Paper</h2><div id="questions">${qHtml}</div><div class="section-break"><h2>Part B: Answer Key & Solutions</h2><div id="solutions">${sHtml}</div></div><script>document.addEventListener("DOMContentLoaded", function() { renderMathInElement(document.body, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError : false, trust: true }); setTimeout(() => { window.print(); }, 1000); });</script></body></html>`;
+    printWindow.document.write(fullHtml);
+    printWindow.document.close();
+  };
+
   const handleAIGenerateDaily = async () => {
       const totalQuestions = (Object.values(generationConfig) as SubjectConfig[]).reduce((acc, curr) => acc + curr.mcq + curr.numerical, 0);
       if (totalQuestions === 0) {
-        alert("Please configure at least one question to generate.");
+        showToast("Please configure at least one question to generate.", 'error');
         return;
       }
-      
-      const confirmMsg = `Generate Daily Paper for ${uploadDate}?\n` +
-          `• Physics: ${generationConfig.physics.mcq + generationConfig.physics.numerical} Qs (${generationConfig.physics.chapters.length || 'All'} Chapters)\n` +
-          `• Chemistry: ${generationConfig.chemistry.mcq + generationConfig.chemistry.numerical} Qs (${generationConfig.chemistry.chapters.length || 'All'} Chapters)\n` +
-          `• Maths: ${generationConfig.mathematics.mcq + generationConfig.mathematics.numerical} Qs (${generationConfig.mathematics.chapters.length || 'All'} Chapters)`;
-          
-      if(!confirm(confirmMsg)) return;
-      
-      setIsGeneratingAI(true);
-      setParsedQuestions([]); 
-      setGenStatus("Initializing Granular Generation...");
-      
-      try {
-          // Pass the full detailed config to the service
-          const result = await generateFullJEEDailyPaper(generationConfig);
-          
-          const failedSubjects: string[] = [];
-          if (!result.physics || result.physics.length === 0) failedSubjects.push("Physics");
-          if (!result.chemistry || result.chemistry.length === 0) failedSubjects.push("Chemistry");
-          if (!result.mathematics || result.mathematics.length === 0) failedSubjects.push("Mathematics");
-
-          const combined = [
-            ...(result.physics || []),
-            ...(result.chemistry || []),
-            ...(result.mathematics || [])
-          ];
-
-          if (combined.length === 0) {
-              throw new Error("AI engine failed to produce questions. Check API Key or try again.");
+      setConfirmState({
+          isOpen: true,
+          title: 'Initiate AI Generation',
+          message: `Generate Daily Paper for ${uploadDate}? This will use your configured AI model to create ${totalQuestions} unique questions.`,
+          onConfirm: async () => {
+              closeConfirm();
+              setIsGeneratingAI(true);
+              setParsedQuestions([]); 
+              setGenStatus("Connecting to Gemini AI...");
+              try {
+                  const result = await generateFullJEEDailyPaper(generationConfig);
+                  const combined = [...(result.physics || []), ...(result.chemistry || []), ...(result.mathematics || [])];
+                  if (combined.length === 0) throw new Error("AI engine failed to produce questions. Check API Key or try again.");
+                  const final = combined.map((q, idx) => ({ ...q, id: `daily-ai-${idx}-${Date.now()}`, subject: q.subject || 'General' }));
+                  setParsedQuestions(final);
+                  showToast(`Success! Generated ${final.length} questions.`);
+              } catch (e: any) {
+                  console.error("Admin Generation Error:", e);
+                  showToast("Generation Failed: " + (e.message || "Cognitive server error."), 'error');
+              } finally {
+                  setIsGeneratingAI(false);
+                  setGenStatus("");
+              }
           }
-
-          const final = combined.map((q, idx) => ({
-              ...q, 
-              id: `daily-ai-${idx}-${Date.now()}`,
-              subject: q.subject || 'General' 
-          }));
-          
-          setParsedQuestions(final);
-          
-          if (failedSubjects.length > 0) {
-             alert(`Generated ${final.length} questions. Warning: Failed to generate for ${failedSubjects.join(", ")}.`);
-          } else {
-             alert(`Success! Generated ${final.length} questions strictly following your configuration.`);
-          }
-      } catch (e: any) {
-          console.error("Admin Generation Error:", e);
-          alert("Generation Failed: " + (e.message || "Cognitive server error."));
-      } finally {
-          setIsGeneratingAI(false);
-          setGenStatus("");
-      }
+      });
   };
 
   const handlePublishDaily = async () => {
     if (parsedQuestions.length === 0) {
-        alert("Empty paper. Generate or parse some questions first.");
+        showToast("Empty paper. Generate or parse some questions first.", 'error');
         return;
     }
-    if (!confirm(`Publish paper for ${uploadDate}?`)) return;
-    
-    setIsPublishing(true);
-    try {
-      const exists = dailyPapers.find(p => p.date === uploadDate);
-      if (exists) {
-        if(!confirm(`A paper already exists for ${uploadDate}. Replace it?`)) {
-            setIsPublishing(false);
-            return;
+    const publishLogic = async () => {
+        setIsPublishing(true);
+        try {
+          const { error } = await createDailyChallenge(uploadDate, parsedQuestions);
+          if (error) throw error;
+          await loadDailyPapers();
+          setParsedQuestions([]);
+          setQFile(null);
+          setSFile(null);
+          showToast("Paper Published Successfully!");
+          setActiveTab('Daily Challenges');
+        } catch (e: any) {
+          console.error("Publish Error:", e);
+          if (e.code === '42501' || (e.message && e.message.includes('policy'))) {
+              setShowSqlFix(true);
+          } else {
+              showToast("Failed to publish: " + (e.message || "DB Access Denied."), 'error');
+          }
+        } finally {
+          setIsPublishing(false);
         }
-      }
-
-      await createDailyChallenge(uploadDate, parsedQuestions);
-      await loadDailyPapers();
-      setParsedQuestions([]);
-      setQFile(null);
-      setSFile(null);
-      alert("Paper Published Successfully!");
-      setActiveTab('Daily Challenges');
-    } catch (e) {
-      alert("Failed to publish paper to database.");
-    } finally {
-      setIsPublishing(false);
+    };
+    const exists = dailyPapers.find(p => p.date === uploadDate);
+    if (exists) {
+        setConfirmState({
+            isOpen: true,
+            title: 'Overwrite Existing Paper?',
+            message: `A paper already exists for DATE: ${uploadDate}. Do you want to replace it?`,
+            onConfirm: () => { closeConfirm(); publishLogic(); }
+        });
+    } else {
+        setConfirmState({
+            isOpen: true,
+            title: 'Publish Paper?',
+            message: `Publishing paper for DATE: ${uploadDate}. Students will see it immediately.`,
+            onConfirm: () => { closeConfirm(); publishLogic(); }
+        });
     }
   };
 
+  // UPDATED STATUS CHANGE HANDLER
   const handleStatusChange = async (userId: string, status: 'approved' | 'rejected' | 'pending') => {
     setActionLoading(userId);
+    
+    // Check local admin issue first
+    if (isLocalAdminMode) {
+        showToast("Operation Denied: You are in View-Only Local Admin Mode. To approve users, please Log Out and log in with your Supabase credentials.", 'error');
+        setActionLoading(null);
+        return;
+    }
+
     const error = await updateProfileStatus(userId, status);
+    
     if (!error) {
+      // Optimistic Update
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, status } : u));
+      showToast(`User status updated to ${status}`);
+      // Re-fetch to confirm sync
+      setTimeout(() => loadUsers(), 500); 
     } else {
-      alert("Status update failed: " + error);
+      showToast(error, 'error');
+      // Detect Permission Error
+      if (typeof error === 'string' && (error.includes('policy') || error.includes('permission') || error.includes('42501') || error.includes('Permission'))) {
+          setShowSqlFix(true);
+      }
     }
     setActionLoading(null);
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Permanently remove this user?")) return;
-    setActionLoading(userId);
-    const error = await deleteProfile(userId);
-    if (!error) setUsers(prev => prev.filter(u => u.id !== userId));
-    else alert("Delete failed: " + error);
-    setActionLoading(null);
+    setConfirmState({
+        isOpen: true,
+        title: 'Delete User?',
+        message: 'This action cannot be undone. Are you sure you want to permanently remove this user?',
+        onConfirm: async () => {
+            closeConfirm();
+            setActionLoading(userId);
+            const error = await deleteProfile(userId);
+            if (!error) {
+                setUsers(prev => prev.filter(u => u.id !== userId));
+                showToast("User deleted successfully.");
+            }
+            else {
+                showToast("Delete failed: " + error, 'error');
+            }
+            setActionLoading(null);
+        }
+    });
   };
 
   const filteredUsers = users.filter(u => {
@@ -424,6 +752,16 @@ const Admin = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12 relative">
+      <ConfirmDialog 
+        isOpen={confirmState.isOpen} 
+        title={confirmState.title} 
+        message={confirmState.message} 
+        onConfirm={confirmState.onConfirm} 
+        onCancel={closeConfirm} 
+      />
+      <SqlFixDialog isOpen={showSqlFix} onClose={() => setShowSqlFix(false)} />
+      {toast && <ToastNotification message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -432,12 +770,19 @@ const Admin = () => {
           </h1>
           <p className="text-slate-500 font-medium">Administrator Dashboard • Platform Oversight</p>
         </div>
+        {isLocalAdminMode && (
+            <div className="p-3 bg-orange-100 border border-orange-200 text-orange-800 rounded-xl text-xs font-bold flex items-center gap-2 max-w-lg">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>View-Only Mode. To enable Write Access, run the 'Database Repair Script' (fixes login issues).</span>
+            </div>
+        )}
       </div>
 
       <div className="flex border-b border-slate-200 gap-8 overflow-x-auto no-scrollbar">
         {[
           { id: 'Daily Paper Upload', icon: <FileUp className="w-4 h-4" /> },
           { id: 'Daily Challenges', icon: <CalendarClock className="w-4 h-4" /> },
+          { id: 'Result Analysis', icon: <FileSpreadsheet className="w-4 h-4" /> },
           { id: 'User Management', icon: <Users className="w-4 h-4" /> },
           { id: 'System Settings', icon: <Zap className="w-4 h-4" /> },
         ].map(tab => (
@@ -456,10 +801,19 @@ const Admin = () => {
       {activeTab === 'System Settings' && (
         <div className="space-y-6">
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-8">
-                 <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6">
-                   <Key className="w-6 h-6 text-fuchsia-600" />
-                   API & System Keys
-                 </h3>
+                 <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                      <Key className="w-6 h-6 text-fuchsia-600" />
+                      API & System Keys
+                    </h3>
+                    <button 
+                        onClick={() => setShowSqlFix(true)} 
+                        className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-all"
+                    >
+                        <Terminal className="w-4 h-4" /> Database Repair Script
+                    </button>
+                 </div>
+                 {/* ... (existing system settings JSX) */}
                  <div className="space-y-8 max-w-2xl">
                     <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-xl flex gap-3 text-yellow-800 text-sm">
                         <AlertTriangle className="w-5 h-5 shrink-0" />
@@ -535,12 +889,21 @@ const Admin = () => {
                  <div className="space-y-4">
                     <div>
                       <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 block">Paper Date (Target)</label>
-                      <input 
-                        type="date" 
-                        value={uploadDate}
-                        onChange={(e) => setUploadDate(e.target.value)}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700"
-                      />
+                      <div className="flex gap-2">
+                          <input 
+                            type="date" 
+                            value={uploadDate}
+                            onChange={(e) => setUploadDate(e.target.value)}
+                            className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700"
+                          />
+                          <button 
+                            onClick={() => setUploadDate(getLocalToday())}
+                            className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-blue-100 transition-colors"
+                            title="Reset to Today"
+                          >
+                            Today
+                          </button>
+                      </div>
                     </div>
 
                     <div className="flex gap-4">
@@ -556,31 +919,35 @@ const Admin = () => {
                              onClick={() => setShowGenConfig(!showGenConfig)}
                              className={`px-6 py-4 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2 text-xs uppercase tracking-widest ${showGenConfig ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
-                            <Sliders className="w-4 h-4" /> Customize
+                            <Sliders className="w-4 h-4" /> {showGenConfig ? 'Hide Config' : 'Customize'}
                         </button>
                     </div>
 
                     <AnimatePresence>
                       {showGenConfig && (
                         <motion.div
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-4"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-4"
                         >
                           {(['physics', 'chemistry', 'mathematics'] as const).map(subject => {
                             const total = generationConfig[subject].mcq + generationConfig[subject].numerical;
-                            const hasConstraints = generationConfig[subject].chapters.length > 0;
+                            const chaptersCount = generationConfig[subject].chapters.length;
+                            const topicsCount = generationConfig[subject].topics.length;
+                            const isFullSyllabus = chaptersCount === 0;
+
                             return (
-                                <div key={subject} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-white rounded-xl border border-slate-100">
+                                <div key={subject} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-white rounded-xl border border-slate-100 hover:border-blue-100 transition-colors">
                                   <div className="flex items-center gap-3 w-full sm:w-1/3">
                                     {subject === 'physics' && <Atom className="w-5 h-5 text-blue-500" />}
                                     {subject === 'chemistry' && <Beaker className="w-5 h-5 text-emerald-500" />}
                                     {subject === 'mathematics' && <FunctionSquare className="w-5 h-5 text-fuchsia-500" />}
                                     <div className="flex flex-col">
                                         <span className="font-bold text-slate-700 capitalize">{subject}</span>
-                                        <button onClick={() => openSubjectModal(subject.charAt(0).toUpperCase() + subject.slice(1))} className="text-[10px] font-black text-blue-600 hover:underline text-left mt-1">
-                                            {hasConstraints ? `Filtered (${generationConfig[subject].chapters.length} Ch)` : 'Full Syllabus'}
+                                        <button onClick={() => openSubjectModal(subject.charAt(0).toUpperCase() + subject.slice(1))} className="text-[10px] font-black text-blue-600 hover:underline text-left mt-1 flex items-center gap-1">
+                                            <Sliders className="w-3 h-3" />
+                                            {isFullSyllabus ? 'Full Syllabus' : `Configured: ${chaptersCount} Ch / ${topicsCount} Tops`}
                                         </button>
                                     </div>
                                   </div>
@@ -603,6 +970,7 @@ const Admin = () => {
                       )}
                     </AnimatePresence>
 
+                    {/* ... (rest of daily upload JSX) ... */}
                     <div className="relative flex py-2 items-center">
                         <div className="flex-grow border-t border-slate-200"></div>
                         <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase">OR Upload PDF</span>
@@ -689,11 +1057,18 @@ const Admin = () => {
                  </div>
 
                  {parsedQuestions.length > 0 && (
-                    <div className="mt-6 pt-6 border-t border-slate-200">
+                    <div className="mt-6 pt-6 border-t border-slate-200 flex gap-3">
+                       <button
+                         onClick={handleDownloadPDF}
+                         className="px-6 py-4 bg-white border border-slate-200 text-slate-600 rounded-xl font-black hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                         title="Download PDF with Solutions"
+                       >
+                         <Download className="w-5 h-5" />
+                       </button>
                        <button 
                          onClick={handlePublishDaily}
                          disabled={isPublishing}
-                         className="w-full py-4 bg-green-600 text-white rounded-xl font-black shadow-lg hover:bg-green-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                         className="flex-1 py-4 bg-green-600 text-white rounded-xl font-black shadow-lg hover:bg-green-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                        >
                          {isPublishing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
                          Publish to Students

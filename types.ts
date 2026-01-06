@@ -26,7 +26,7 @@ export interface Question {
   subject: Subject;
   chapter: string;
   type: QuestionType;
-  difficulty: Difficulty;
+  difficulty: string; // Changed from Difficulty enum to string for flexibility
   statement: string;
   options?: string[]; // Only for MCQ
   correctAnswer: string | number;

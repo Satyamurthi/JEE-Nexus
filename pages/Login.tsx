@@ -8,7 +8,8 @@ import { supabase, getProfile } from '../supabase';
 const PRE_APPROVED_BATCH = [
     'SAMARTH@ABC.COM', 'SAMVITH@ABC.COM', 'PARTHA@ABC.COM', 
     'TEJAS@ABC.COM', 'KUSHAL@ABC.COM', 'APEKSHA@ABC.COM', 
-    'YUKTHI@ABC.COM', 'NANDITHA@ABC.COM', 'CHANDU@ABC.COM'
+    'YUKTHI@ABC.COM', 'NANDITHA@ABC.COM', 'CHANDU@ABC.COM',
+    'NAME@ADMIN.COM' // Added offline support for admin
 ];
 
 const Login = () => {
@@ -23,20 +24,68 @@ const Login = () => {
     setLoading(true);
     setError(null);
 
-    // 1. Root Admin Bypass (Always active)
-    // Added name@admin.com per request
-    const isAdminUser = (email === 'example@gmail.com' || email === 'name@example.com' || email === 'name@admin.com') && password === 'admin123';
+    const lowerEmail = email.toLowerCase();
+    let cloudAuthAttempted = false;
+
+    // 1. Try Supabase Login FIRST (if available)
+    if (supabase) {
+      cloudAuthAttempted = true;
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: email, // Supabase usually handles case, but best to be safe
+          password,
+        });
+
+        if (!authError && authData.user) {
+            // Successful Cloud Login
+            const profile = await getProfile(authData.user.id);
+            
+            if (!profile) {
+                await supabase.auth.signOut();
+                throw new Error("Profile not found. Please contact support.");
+            }
+
+            if (profile.status !== 'approved') {
+                await supabase.auth.signOut();
+                setError(`Access Denied: Your account is currently '${profile.status}'. Please wait for an administrator to approve your request.`);
+                setLoading(false);
+                return;
+            }
+
+            localStorage.setItem('user_profile', JSON.stringify(profile));
+            navigate('/');
+            return;
+        }
+        
+        // Log failure but allow fallback
+        if (authError) {
+            console.warn("Supabase Login Failed (Attempting Fallback):", authError.message);
+        }
+
+      } catch (err: any) {
+          console.warn("Supabase Exception (Attempting Fallback):", err.message);
+      }
+    }
+
+    // 2. Root Admin Bypass (Fallback if Supabase login failed or offline)
+    // Only works for specific emails - Case Insensitive Check
+    const isHardcodedAdmin = (lowerEmail === 'example@gmail.com' || lowerEmail === 'name@example.com' || lowerEmail === 'name@admin.com') && password === 'admin123';
     
-    if (isAdminUser) {
+    if (isHardcodedAdmin) {
       const adminProfile = {
-        id: `admin-root-${email.split('@')[0]}`,
-        email: email,
-        full_name: 'System Admin',
+        id: `admin-root-${lowerEmail.split('@')[0]}`,
+        email: email, // Keep original case for display
+        full_name: 'System Admin (Local)',
         role: 'admin',
         status: 'approved',
         created_at: new Date().toISOString()
       };
       localStorage.setItem('user_profile', JSON.stringify(adminProfile));
+      
+      if (supabase) {
+          console.warn("Logged in via Admin Bypass (Cloud Login Failed).");
+      }
+
       setTimeout(() => {
         setLoading(false);
         navigate('/');
@@ -44,80 +93,55 @@ const Login = () => {
       return;
     }
 
-    // 2. Offline Mode Login
-    if (!supabase) {
-      // Simulate network delay
-      await new Promise(r => setTimeout(r, 800));
+    // 3. Local/Demo Mode Login (Fallback)
+    // Runs if Cloud failed or isn't configured
+    
+    // Simulate network delay if we didn't try cloud (offline mode feel)
+    if (!cloudAuthAttempted) await new Promise(r => setTimeout(r, 800));
       
-      try {
-        const profiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
-        let user = profiles.find((p: any) => p.email.toLowerCase() === email.toLowerCase());
+    try {
+      const profiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
+      let user = profiles.find((p: any) => p.email.toLowerCase() === lowerEmail);
 
-        // AUTO-PROVISION FALLBACK: If user matches the batch but isn't in DB yet, create them now.
-        if (!user && PRE_APPROVED_BATCH.includes(email.toUpperCase())) {
-            const name = email.split('@')[0];
-            user = {
-                id: `auto-${Date.now()}`,
-                email: email.toUpperCase(),
-                full_name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
-                role: 'student',
-                status: 'approved',
-                created_at: new Date().toISOString()
-            };
-            profiles.push(user);
-            localStorage.setItem('nexus_profiles', JSON.stringify(profiles));
-        }
-
-        if (!user) {
-          throw new Error("User not found in local directory. Please sign up first.");
-        }
-
-        if (user.status !== 'approved') {
-          throw new Error(`Your account status is '${user.status}'. Please wait for admin approval.`);
-        }
-
-        localStorage.setItem('user_profile', JSON.stringify(user));
-        navigate('/');
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      // AUTO-PROVISION FALLBACK for Demo Batch
+      if (!user && PRE_APPROVED_BATCH.includes(email.toUpperCase())) {
+          const name = email.split('@')[0];
+          user = {
+              id: `auto-${Date.now()}`,
+              email: email.toUpperCase(),
+              full_name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
+              role: 'student',
+              status: 'approved',
+              created_at: new Date().toISOString()
+          };
+          profiles.push(user);
+          localStorage.setItem('nexus_profiles', JSON.stringify(profiles));
       }
+
+      if (user) {
+          if (user.status !== 'approved') {
+            throw new Error(`Your account status is '${user.status}'. Please wait for admin approval.`);
+          }
+
+          // In Local/Demo mode, we trust the email existence as "auth" for simplicity, 
+          // or we could check a mock password. Assuming Open Access for Demo Batch.
+          localStorage.setItem('user_profile', JSON.stringify(user));
+          navigate('/');
+          return;
+      }
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
       return;
     }
-
-    // 3. Supabase Cloud Login
-    try {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (authError) throw authError;
-
-      // 4. Check Profile Status
-      const profile = await getProfile(authData.user.id);
-      
-      // If profile missing (race condition in trigger?), deny access
-      if (!profile) {
-          await supabase.auth.signOut();
-          throw new Error("Profile not found. Please contact support.");
-      }
-
-      if (profile.status !== 'approved') {
-        await supabase.auth.signOut(); // Kick them out immediately
-        setError(`Access Denied: Your account is currently '${profile.status}'. Please wait for an administrator to approve your request.`);
-        setLoading(false);
-        return;
-      }
-
-      localStorage.setItem('user_profile', JSON.stringify(profile));
-      navigate('/');
-    } catch (err: any) {
-      setError(err.message || "Identity verification failed.");
-    } finally {
-      setLoading(false);
+    
+    // 4. Final Failure (Neither Cloud nor Local User found)
+    if (lowerEmail.includes('admin') || lowerEmail.includes('example')) {
+        setError("Admin Login Failed: Cloud rejected credentials and Local Bypass failed (Password must be 'admin123').");
+    } else {
+        setError("Invalid login credentials. User not found in Cloud or Local directory.");
     }
+    setLoading(false);
   };
 
   return (

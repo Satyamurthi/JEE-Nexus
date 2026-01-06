@@ -1,20 +1,64 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { Layout, LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid } from 'lucide-react';
+import { Layout, LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Dashboard from './pages/Dashboard';
-import ExamSetup from './pages/ExamSetup';
-import ExamPortal from './pages/ExamPortal';
-import Analytics from './pages/Analytics';
-import History from './pages/History';
-import Admin from './pages/Admin';
-import Practice from './pages/Practice';
-import Daily from './pages/Daily';
-import Login from './pages/Login';
-import Signup from './pages/Signup';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
+
+// Lazy Load Pages for Performance Optimization
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const ExamSetup = React.lazy(() => import('./pages/ExamSetup'));
+const ExamPortal = React.lazy(() => import('./pages/ExamPortal'));
+const Analytics = React.lazy(() => import('./pages/Analytics'));
+const History = React.lazy(() => import('./pages/History'));
+const Admin = React.lazy(() => import('./pages/Admin'));
+const Practice = React.lazy(() => import('./pages/Practice'));
+const Daily = React.lazy(() => import('./pages/Daily'));
+const Login = React.lazy(() => import('./pages/Login'));
+const Signup = React.lazy(() => import('./pages/Signup'));
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center">
+          <div className="p-4 bg-red-50 rounded-full mb-4">
+             <AlertTriangle className="w-8 h-8 text-red-500" />
+          </div>
+          <h2 className="text-lg font-black text-slate-900 mb-2">Module Load Failed</h2>
+          <p className="text-slate-500 text-sm mb-6 max-w-xs">
+            A network interruption prevented this section from loading.
+          </p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 transition-all"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Reload Application
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const profileRaw = localStorage.getItem('user_profile');
@@ -32,7 +76,17 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
-const Sidebar = ({ isOpen, toggle }: { isOpen: boolean, toggle: () => void }) => {
+const PageLoader = () => (
+  <div className="flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in duration-300">
+    <div className="relative">
+      <div className="w-12 h-12 border-4 border-indigo-100 rounded-full"></div>
+      <div className="absolute top-0 left-0 w-12 h-12 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+    </div>
+    <p className="mt-4 text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">Loading Module...</p>
+  </div>
+);
+
+const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean, toggle: () => void, installPrompt: any, onInstall: () => void }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const profile = JSON.parse(localStorage.getItem('user_profile') || '{}');
@@ -110,7 +164,17 @@ const Sidebar = ({ isOpen, toggle }: { isOpen: boolean, toggle: () => void }) =>
           })}
         </nav>
 
-        <div className="p-6">
+        <div className="p-6 space-y-4">
+          {installPrompt && (
+            <button
+              onClick={onInstall}
+              className="flex items-center justify-center w-full px-4 py-3 text-[10px] font-black text-indigo-100 bg-indigo-600/20 border border-indigo-500/30 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group animate-in fade-in slide-in-from-bottom-2"
+            >
+              <Download className="w-3.5 h-3.5 mr-2" />
+              Install App
+            </button>
+          )}
+
           <div className="bg-white/5 rounded-[1.5rem] p-5 border border-white/10 backdrop-blur-md">
             <div className="flex items-center gap-4 mb-5">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-400 to-cyan-400 flex items-center justify-center text-slate-900 font-black shadow-lg shadow-emerald-900/20">
@@ -188,6 +252,8 @@ const BackgroundBlobs = () => (
 
 const AppContent = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const location = useLocation();
   const isAuth = location.pathname.startsWith('/login') || location.pathname.startsWith('/signup');
   const isExamPortal = location.pathname.startsWith('/exam-portal');
@@ -196,45 +262,116 @@ const AppContent = () => {
     setSidebarOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    // PWA Install Prompt Logic
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    // Offline Detection Logic
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        }
+        setDeferredPrompt(null);
+      });
+    }
+  };
+
   return (
     <AnimatePresence mode="wait" initial={false}>
+      {/* Offline Toast */}
+      {isOffline && (
+        <motion.div 
+           initial={{ y: 50, opacity: 0 }}
+           animate={{ y: 0, opacity: 1 }}
+           exit={{ y: 50, opacity: 0 }}
+           className="fixed bottom-6 left-6 z-[60] px-6 py-4 bg-slate-900 text-white rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700"
+        >
+           <WifiOff className="w-5 h-5 text-red-400 animate-pulse" />
+           <span className="text-sm font-bold">You are offline. Cached mode active.</span>
+        </motion.div>
+      )}
+
       {isAuth ? (
-        <Routes key="auth">
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-        </Routes>
+        <motion.div key="auth-wrapper" className="w-full min-h-screen bg-slate-50" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+            <NetworkErrorBoundary>
+              <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-slate-50"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>}>
+                <Routes location={location}>
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/signup" element={<Signup />} />
+                </Routes>
+              </Suspense>
+            </NetworkErrorBoundary>
+        </motion.div>
       ) : isExamPortal ? (
-        <ProtectedRoute key="exam">
-          <Routes>
-            <Route path="/exam-portal" element={<ExamPortal />} />
-          </Routes>
-        </ProtectedRoute>
+        <motion.div key="exam-portal-wrapper" className="w-full h-full" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+            <ProtectedRoute>
+              <NetworkErrorBoundary>
+                <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-slate-50"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>}>
+                  <Routes location={location}>
+                    <Route path="/exam-portal" element={<ExamPortal />} />
+                  </Routes>
+                </Suspense>
+              </NetworkErrorBoundary>
+            </ProtectedRoute>
+        </motion.div>
       ) : (
-        <ProtectedRoute key="main">
+        <ProtectedRoute key="main-app-wrapper">
           <div className="min-h-screen relative flex">
             <BackgroundBlobs />
-            <Sidebar isOpen={sidebarOpen} toggle={() => setSidebarOpen(false)} />
+            <Sidebar 
+                isOpen={sidebarOpen} 
+                toggle={() => setSidebarOpen(false)} 
+                installPrompt={deferredPrompt}
+                onInstall={handleInstallClick}
+            />
             <div className="flex-1 flex flex-col min-w-0">
               <Header toggleSidebar={() => setSidebarOpen(true)} />
-              <main className="flex-1 lg:ml-[280px] p-6 sm:p-10 transition-all">
-                <motion.div
-                  key={location.pathname}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  <Routes location={location}>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/daily" element={<Daily />} />
-                    <Route path="/exam-setup" element={<ExamSetup />} />
-                    <Route path="/practice" element={<Practice />} />
-                    <Route path="/analytics" element={<Analytics />} />
-                    <Route path="/history" element={<History />} />
-                    <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </motion.div>
+              <main className="flex-1 lg:ml-[280px] p-6 sm:p-10 transition-all overflow-x-hidden">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={location.pathname}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="w-full"
+                  >
+                    <NetworkErrorBoundary>
+                      <Suspense fallback={<PageLoader />}>
+                        <Routes location={location}>
+                          <Route path="/" element={<Dashboard />} />
+                          <Route path="/daily" element={<Daily />} />
+                          <Route path="/exam-setup" element={<ExamSetup />} />
+                          <Route path="/practice" element={<Practice />} />
+                          <Route path="/analytics" element={<Analytics />} />
+                          <Route path="/history" element={<History />} />
+                          <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                          <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                      </Suspense>
+                    </NetworkErrorBoundary>
+                  </motion.div>
+                </AnimatePresence>
               </main>
             </div>
           </div>

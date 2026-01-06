@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Zap, Flame, Loader2, CheckCircle2, Trophy, Brain, Dices, Database, Sparkles, ChevronRight, Layers, Sliders, PlayCircle } from 'lucide-react';
+import { BookOpen, Zap, Flame, Loader2, CheckCircle2, Trophy, Brain, Dices, Database, Sparkles, ChevronRight, Layers, Sliders, PlayCircle, Settings, Scale } from 'lucide-react';
 import { Subject, Difficulty, ExamType, Question } from '../types';
 import { NCERT_CHAPTERS } from '../constants';
 import { generateJEEQuestions } from '../geminiService';
@@ -14,7 +14,11 @@ const Practice = () => {
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [isRandomMode, setIsRandomMode] = useState(true);
-  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(Difficulty.Medium);
+  
+  // Enhanced Settings
+  const [selectedDifficulty, setSelectedDifficulty] = useState<string>(Difficulty.Medium);
+  const [questionCount, setQuestionCount] = useState<number>(10);
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [questionBankCount, setQuestionBankCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -80,7 +84,6 @@ const Practice = () => {
   };
 
   const handleDeselectAllTopics = (chapterTopics: string[]) => {
-    // If a user deselects all, it implies they are making a specific choice, so random mode should be off.
     setIsRandomMode(false);
     setSelectedTopics(prev => prev.filter(t => !chapterTopics.includes(t)));
   };
@@ -88,21 +91,21 @@ const Practice = () => {
   const startPractice = async () => {
     setIsGenerating(true);
     try {
-      // Logic: If Random Mode is active, pass empty topics.
-      // If Random Mode is inactive but topics list is empty, treat as Random for the selected chapters (fallback)
       const topicsToSend = isRandomMode ? [] : selectedTopics;
 
       const questions = await generateJEEQuestions(
         selectedSubject, 
-        10, 
+        questionCount, 
         ExamType.Main, 
         selectedChapters, 
         selectedDifficulty,
         topicsToSend
       );
+      
+      if (!questions || questions.length === 0) throw new Error("No questions generated.");
+
       await persistQuestions(questions);
       
-      // Construct session title based on configuration
       let sessionType = `${selectedChapters[0]} Drill`;
       if (selectedChapters.length > 1) {
           sessionType = `Mixed Drill (${selectedChapters.length} Chapters)`;
@@ -113,11 +116,14 @@ const Practice = () => {
           sessionType += ` - Random Mix`;
       }
       
+      // Calculate duration: 2.4 mins per question
+      const duration = Math.ceil(questions.length * 2.4);
+
       const sessionData = {
         type: sessionType,
         questions: questions,
         startTime: Date.now(),
-        durationMinutes: 45 
+        durationMinutes: duration 
       };
       localStorage.setItem('active_session', JSON.stringify(sessionData));
       navigate('/exam-portal');
@@ -131,10 +137,13 @@ const Practice = () => {
   const startRandomPractice = async () => {
     setIsSyncing(true);
     let selected: Question[] = [];
+    // Try to get double the requested count to pick randoms from
+    const fetchLimit = questionCount * 2;
+    
     if (supabase) {
-      const dbQuestions = await fetchQuestionsFromDB(undefined, undefined, 50);
+      const dbQuestions = await fetchQuestionsFromDB(undefined, undefined, fetchLimit);
       if (dbQuestions && dbQuestions.length >= 5) {
-        selected = [...dbQuestions].sort(() => 0.5 - Math.random()).slice(0, 10);
+        selected = [...dbQuestions].sort(() => 0.5 - Math.random()).slice(0, questionCount);
       }
     }
     if (selected.length < 5) {
@@ -142,7 +151,7 @@ const Practice = () => {
       if (bankRaw) {
         try {
           const bank: Question[] = JSON.parse(bankRaw);
-          if (bank.length >= 5) selected = [...bank].sort(() => 0.5 - Math.random()).slice(0, 10);
+          if (bank.length >= 5) selected = [...bank].sort(() => 0.5 - Math.random()).slice(0, questionCount);
         } catch(e) {}
       }
     }
@@ -151,7 +160,15 @@ const Practice = () => {
       setIsSyncing(false);
       return;
     }
-    const sessionData = { type: "Rapid Fire Mix", questions: selected, startTime: Date.now(), durationMinutes: 30 };
+    
+    const duration = Math.ceil(selected.length * 2.4);
+
+    const sessionData = { 
+        type: "Rapid Fire Mix", 
+        questions: selected, 
+        startTime: Date.now(), 
+        durationMinutes: duration 
+    };
     localStorage.setItem('active_session', JSON.stringify(sessionData));
     navigate('/exam-portal');
     setIsSyncing(false);
@@ -173,7 +190,7 @@ const Practice = () => {
             Drill <span className={`text-${currentColor}-600`}>Station</span>
           </h1>
           <p className="text-slate-500 font-medium text-lg max-w-2xl">
-            Precision training modules. Select your parameters and let the AI generate a targeted problem set.
+            Precision training modules. Customize intensity, quantity, and difficulty for targeted mastery.
           </p>
         </div>
         <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl flex items-center gap-6">
@@ -195,9 +212,10 @@ const Practice = () => {
             <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-premium h-full flex flex-col">
                 <div className="flex items-center gap-3 mb-8">
                     <Sliders className="w-5 h-5 text-slate-400" />
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">Config</h3>
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">Configuration</h3>
                 </div>
                 <div className="space-y-8 flex-1">
+                    {/* Domain Selection */}
                     <div>
                         <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 block">1. Domain</label>
                         <div className="flex flex-col gap-3">
@@ -213,22 +231,54 @@ const Practice = () => {
                             ))}
                         </div>
                     </div>
+
+                    {/* Question Count Selection */}
                     <div>
-                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 block">2. Intensity</label>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="flex justify-between items-center mb-4">
+                            <label className="text-xs font-black text-slate-400 uppercase tracking-widest">2. Session Size</label>
+                            <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-md">{questionCount} Qs</span>
+                        </div>
+                        <input 
+                            type="range" 
+                            min="5" 
+                            max="30" 
+                            step="5" 
+                            value={questionCount} 
+                            onChange={(e) => setQuestionCount(parseInt(e.target.value))}
+                            className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-slate-900 hover:accent-slate-700"
+                        />
+                        <div className="flex justify-between text-[10px] font-bold text-slate-300 mt-2 px-1">
+                            <span>5</span>
+                            <span>15</span>
+                            <span>30</span>
+                        </div>
+                    </div>
+
+                    {/* Difficulty Selection */}
+                    <div>
+                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 block">3. Difficulty Mix</label>
+                        <div className="grid grid-cols-3 gap-2 mb-2">
                             {[Difficulty.Easy, Difficulty.Medium, Difficulty.Hard].map((diff) => (
                                 <button key={diff} onClick={() => setSelectedDifficulty(diff)}
-                                    className={`py-3 rounded-xl font-bold text-xs transition-all ${selectedDifficulty === diff ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
+                                    className={`py-3 rounded-xl font-bold text-xs transition-all border-2 ${selectedDifficulty === diff ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-50 hover:bg-slate-100'}`}>
                                     {diff}
                                 </button>
                             ))}
                         </div>
+                        <button 
+                            onClick={() => setSelectedDifficulty("Balanced Mix (Easy: 30%, Medium: 50%, Hard: 20%)")}
+                            className={`w-full py-3 rounded-xl font-bold text-xs transition-all border-2 flex items-center justify-center gap-2 ${selectedDifficulty.includes("Balanced") ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-600 shadow-lg' : 'bg-white text-slate-500 border-slate-100 hover:border-slate-200'}`}
+                        >
+                            <Scale className="w-4 h-4" />
+                            Smart Adaptive Mix
+                        </button>
                     </div>
                 </div>
+                
                 <div className="mt-8 pt-8 border-t border-slate-100">
                      <button onClick={startRandomPractice} className="w-full py-4 bg-white border-2 border-slate-100 text-slate-600 rounded-2xl font-black flex items-center justify-center gap-3 hover:border-indigo-200 hover:text-indigo-600 transition-all group">
                         <Dices className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
-                        Surprise Me
+                        Surprise Me ({questionCount} Qs)
                      </button>
                 </div>
             </div>
@@ -237,7 +287,7 @@ const Practice = () => {
         <div className="lg:col-span-8 flex flex-col gap-8">
             <div className={`flex-1 bg-${currentColor}-50/50 p-10 rounded-[3rem] border border-${currentColor}-100/50 shadow-sm relative overflow-hidden flex flex-col`}>
                 <div className="absolute top-0 right-0 p-10 opacity-10 pointer-events-none"><Layers className={`w-64 h-64 text-${currentColor}-900`} /></div>
-                <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">3. Select Target Chapter(s)</h2>
+                <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">4. Select Target Chapter(s)</h2>
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 relative z-10 space-y-3 max-h-[500px]">
                     {NCERT_CHAPTERS[selectedSubject].map((chap, idx) => {
                         const isSelected = selectedChapters.includes(chap.name);
@@ -261,7 +311,7 @@ const Practice = () => {
             {selectedChapters.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                     className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-premium">
-                    <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">4. Select Target Topic(s)</h2>
+                    <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">5. Select Target Topic(s)</h2>
                     <div className="space-y-6">
                         <div className="flex flex-wrap gap-3 border-b border-slate-100 pb-6">
                            <button onClick={handleRandomModeToggle}
@@ -302,7 +352,7 @@ const Practice = () => {
             <motion.button whileHover={{ scale: 1.01, y: -2 }} whileTap={{ scale: 0.98 }}
                 onClick={startPractice} disabled={isGenerating || selectedChapters.length === 0}
                 className={`w-full py-8 rounded-[2.5rem] font-black text-2xl text-white shadow-2xl flex items-center justify-center gap-4 transition-all ${isGenerating || selectedChapters.length === 0 ? 'bg-slate-400 cursor-not-allowed' : `bg-gradient-to-r from-${currentColor}-500 to-${currentColor}-600 shadow-${currentColor}-500/30 hover:shadow-${currentColor}-500/50`}`}>
-                {isGenerating ? (<><Loader2 className="w-8 h-8 animate-spin" /> Synthesizing Problem Set...</>) : (<><PlayCircle className="w-8 h-8" /> Initiate Simulation</>)}
+                {isGenerating ? (<><Loader2 className="w-8 h-8 animate-spin" /> Synthesizing {questionCount} Problems...</>) : (<><PlayCircle className="w-8 h-8" /> Initiate Simulation</>)}
             </motion.button>
         </div>
       </div>

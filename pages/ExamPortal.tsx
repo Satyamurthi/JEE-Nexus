@@ -1,12 +1,11 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Clock, HelpCircle, RotateCcw, Monitor, Send, Info, CheckCircle2, Menu, X, LayoutGrid, AlertCircle, Brain, Lightbulb } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, HelpCircle, RotateCcw, Monitor, Send, CheckCircle2, Menu, X, LayoutGrid, AlertCircle, Brain } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Question } from '../types';
 import MathText from '../components/MathText';
 import { submitDailyAttempt } from '../supabase';
-import { getQuickHint } from '../geminiService';
 
 const AnimatedTimer = ({ timeLeft, durationMinutes }: { timeLeft: number, durationMinutes: number }) => {
   const formatTime = (s: number) => {
@@ -54,12 +53,64 @@ const ExamPortal = () => {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Hint State
-  const [hint, setHint] = useState<string | null>(null);
-  const [loadingHint, setLoadingHint] = useState(false);
+  // Refs to track latest state for the timer interval
+  const responsesRef = useRef(responses);
+  const sessionRef = useRef(session);
+  const isSubmittingRef = useRef(isSubmitting);
 
+  // Sync refs with state
+  useEffect(() => { responsesRef.current = responses; }, [responses]);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => { isSubmittingRef.current = isSubmitting; }, [isSubmitting]);
+  
   const SESSION_KEY = 'active_session';
   const userProfile = JSON.parse(localStorage.getItem('user_profile') || '{}');
+
+  const performSubmission = async () => {
+    if (isSubmittingRef.current) return;
+    setIsSubmitting(true);
+    
+    const currentSession = sessionRef.current;
+    const currentResponses = responsesRef.current;
+
+    let score = 0;
+    const questionResults = currentSession.questions.map((q: Question, idx: number) => {
+      const resp = currentResponses[idx];
+      const isCorrect = resp !== undefined && resp !== '' && resp.toString().trim() === q.correctAnswer.toString().trim();
+      if (resp !== undefined && resp !== '') {
+        if (isCorrect) score += q.markingScheme.positive;
+        else score -= q.markingScheme.negative;
+      }
+      return { ...q, userAnswer: resp, isCorrect };
+    });
+    
+    const totalPossible = currentSession.questions.length * 4;
+    const accuracy = Math.round((score / Math.max(1, totalPossible)) * 100);
+    const results = {
+      id: Date.now().toString(36),
+      score, totalPossible, accuracy,
+      completedAt: Date.now(),
+      questions: questionResults,
+      type: currentSession.type
+    };
+    
+    try {
+        const historyRaw = localStorage.getItem('exam_history');
+        const history = historyRaw ? JSON.parse(historyRaw) : [];
+        localStorage.setItem('exam_history', JSON.stringify([results, ...history].slice(0, 50)));
+    } catch (e) {}
+
+    if (currentSession.isDaily && currentSession.dailyDate && userProfile.id) {
+        try { 
+          await submitDailyAttempt(userProfile.id, currentSession.dailyDate, score, totalPossible, { accuracy, completedAt: results.completedAt }, questionResults); 
+        } catch(e) {
+          console.error("Failed to submit daily", e);
+        }
+    }
+    localStorage.setItem('last_result', JSON.stringify(results));
+    localStorage.removeItem(SESSION_KEY);
+    navigate('/analytics');
+  };
 
   useEffect(() => {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -69,87 +120,52 @@ const ExamPortal = () => {
     }
     const data = JSON.parse(raw);
     setSession(data);
-    if (data.responses) setResponses(data.responses);
+    sessionRef.current = data; // Immediate ref update
+
+    if (data.responses) {
+        setResponses(data.responses);
+        responsesRef.current = data.responses;
+    }
     if (data.currentQuestionIndex) setCurrentIdx(data.currentQuestionIndex);
     if (data.markedForReview) setMarkedForReview(new Set(data.markedForReview));
     if (data.visited) setVisited(new Set(data.visited));
     
+    // Resume Timer Logic
     const now = Date.now();
     const elapsedSeconds = Math.floor((now - data.startTime) / 1000);
     const totalSeconds = data.durationMinutes * 60;
     const remaining = Math.max(0, totalSeconds - elapsedSeconds);
     setTimeLeft(remaining);
 
+    // If time has already expired while the user was away/closed tab
+    if (remaining <= 0) {
+        // We use setTimeout to ensure state is fully hydrated before submitting
+        setTimeout(() => performSubmission(), 500);
+        return;
+    }
+
     const timer = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timer);
-          submitExam();
+          performSubmission(); // Uses refs to get latest state
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, []); // Run once on mount
 
+  // Sync state to local storage for persistence
   useEffect(() => {
     if (!session) return;
     const updatedSession = { ...session, responses, currentQuestionIndex: currentIdx, markedForReview: Array.from(markedForReview), visited: Array.from(visited) };
     localStorage.setItem(SESSION_KEY, JSON.stringify(updatedSession));
   }, [responses, currentIdx, markedForReview, visited, session]);
   
-  useEffect(() => { setHint(null); }, [currentIdx]);
-
-  const submitExam = useCallback(async () => {
-    if (!session || isSubmitting) return;
-    setIsSubmitting(true);
-    let score = 0;
-    const questionResults = session.questions.map((q: Question, idx: number) => {
-      const resp = responses[idx];
-      const isCorrect = resp !== undefined && resp !== '' && resp.toString().trim() === q.correctAnswer.toString().trim();
-      if (resp !== undefined && resp !== '') {
-        if (isCorrect) score += q.markingScheme.positive;
-        else score -= q.markingScheme.negative;
-      }
-      return { ...q, userAnswer: resp, isCorrect };
-    });
-    const totalPossible = session.questions.length * 4;
-    const accuracy = Math.round((score / Math.max(1, totalPossible)) * 100);
-    const results = {
-      id: Date.now().toString(36),
-      score, totalPossible, accuracy,
-      completedAt: Date.now(),
-      questions: questionResults,
-      type: session.type
-    };
-    
-    try {
-        const historyRaw = localStorage.getItem('exam_history');
-        const history = historyRaw ? JSON.parse(historyRaw) : [];
-        localStorage.setItem('exam_history', JSON.stringify([results, ...history].slice(0, 50)));
-    } catch (e) {}
-
-    if (session.isDaily && session.dailyDate && userProfile.id) {
-        try { 
-          // PASS questionResults as the last argument
-          await submitDailyAttempt(userProfile.id, session.dailyDate, score, totalPossible, { accuracy, completedAt: results.completedAt }, questionResults); 
-        } catch(e) {
-          console.error("Failed to submit daily", e);
-        }
-    }
-    localStorage.setItem('last_result', JSON.stringify(results));
-    localStorage.removeItem(SESSION_KEY);
-    navigate('/analytics');
-  }, [session, responses, navigate, userProfile, isSubmitting]);
-
-  const handleGetHint = async () => {
-    if (!session || hint || loadingHint) return;
-    setLoadingHint(true);
-    const question = session.questions[currentIdx];
-    const hintText = await getQuickHint(question.statement, question.subject);
-    setHint(hintText);
-    setLoadingHint(false);
+  const handleSubmitButton = () => {
+      performSubmission();
   };
 
   if (!session) return null;
@@ -179,7 +195,7 @@ const ExamPortal = () => {
         <div className="flex items-center gap-8">
           <AnimatedTimer timeLeft={timeLeft} durationMinutes={session.durationMinutes} />
           <button onClick={() => setPaletteOpen(!paletteOpen)} className="lg:hidden p-3 bg-slate-50 border border-slate-100 rounded-2xl"><LayoutGrid className="w-6 h-6" /></button>
-          <motion.button whileTap={{ scale: 0.95 }} onClick={() => { if(confirm("Finish exam?")) submitExam() }} disabled={isSubmitting} className="hidden sm:flex px-8 py-3.5 bg-red-600 text-white rounded-2xl font-black text-sm hover:bg-red-700 transition-all shadow-xl items-center gap-2 disabled:opacity-50">
+          <motion.button whileTap={{ scale: 0.95 }} onClick={() => { if(confirm("Finish exam?")) handleSubmitButton() }} disabled={isSubmitting} className="hidden sm:flex px-8 py-3.5 bg-red-600 text-white rounded-2xl font-black text-sm hover:bg-red-700 transition-all shadow-xl items-center gap-2 disabled:opacity-50">
             {isSubmitting ? "Submitting..." : "Submit Exam"}
           </motion.button>
         </div>
@@ -204,20 +220,7 @@ const ExamPortal = () => {
                 <div className="mb-16">
                   <div className="flex justify-between items-start">
                     <MathText text={currentQuestion.statement} className="text-xl sm:text-2xl lg:text-3xl leading-[1.6] text-slate-800 font-medium border-l-8 border-blue-600 pl-10 flex-1" />
-                    <button onClick={handleGetHint} disabled={loadingHint || !!hint} className="ml-6 p-3 rounded-2xl bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-all flex flex-col items-center gap-1 min-w-[80px]" title="Get AI Hint">
-                        <Lightbulb className={`w-6 h-6 ${loadingHint ? 'animate-pulse' : ''}`} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Hint</span>
-                    </button>
                   </div>
-                  {hint && (
-                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-6 ml-10 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-800 text-sm font-medium flex gap-3">
-                        <Info className="w-5 h-5 shrink-0" />
-                        <div className="flex-1">
-                          <p className="font-bold text-xs uppercase tracking-wide mb-1 text-yellow-600">AI Quick Hint</p>
-                          <MathText text={hint} className="text-sm font-medium text-yellow-900" />
-                        </div>
-                    </motion.div>
-                  )}
                 </div>
 
                 {currentQuestion.type === 'MCQ' && currentQuestion.options ? (
@@ -249,23 +252,28 @@ const ExamPortal = () => {
             </div>
             <div className="flex gap-6">
               <motion.button whileTap={{ scale: 0.9 }} disabled={currentIdx === 0} onClick={() => setCurrentIdx(prev => prev - 1)} className="w-20 h-16 rounded-2xl border-2 border-slate-100 text-slate-300 hover:text-slate-900 disabled:opacity-10 flex items-center justify-center"><ChevronLeft className="w-8 h-8" /></motion.button>
-              <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if (currentIdx < session.questions.length - 1) { setCurrentIdx(prev => prev + 1); setVisited(prev => new Set([...prev, (currentIdx + 1).toString()])); } else { if(confirm("End of paper?")) submitExam(); } }} className="px-16 py-4 bg-slate-900 text-white rounded-2xl font-black text-lg flex items-center gap-4 hover:bg-slate-800 shadow-2xl">Save & Next <ChevronRight className="w-5 h-5" /></motion.button>
+              <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if (currentIdx < session.questions.length - 1) { setCurrentIdx(prev => prev + 1); setVisited(prev => new Set([...prev, (currentIdx + 1).toString()])); } else { if(confirm("End of paper?")) handleSubmitButton(); } }} className="px-16 py-4 bg-slate-900 text-white rounded-2xl font-black text-lg flex items-center gap-4 hover:bg-slate-800 shadow-2xl">Save & Next <ChevronRight className="w-5 h-5" /></motion.button>
             </div>
           </footer>
         </div>
 
-        <aside className={`fixed inset-y-0 right-0 w-full sm:w-[380px] bg-white border-l border-slate-100 flex flex-col shadow-2xl z-50 transform transition-transform duration-500 lg:relative lg:translate-x-0 ${paletteOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-          <div className="p-10 border-b border-slate-50 relative">
-            <button onClick={() => setPaletteOpen(false)} className="lg:hidden absolute top-10 right-10 p-2.5 bg-slate-50 rounded-full text-slate-400"><X className="w-5 h-5" /></button>
-            <h2 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-10 text-center lg:text-left">Examination Roadmap</h2>
-            <div className="grid grid-cols-5 gap-3">
+        {/* Updated Aside for Scrolling */}
+        <aside className={`fixed inset-y-0 right-0 w-full sm:w-[380px] bg-white border-l border-slate-100 flex flex-col shadow-2xl z-50 transform transition-transform duration-500 lg:relative lg:translate-x-0 h-full ${paletteOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className="p-8 pb-4 border-b border-slate-50 relative flex-shrink-0">
+            <button onClick={() => setPaletteOpen(false)} className="lg:hidden absolute top-8 right-8 p-2.5 bg-slate-50 rounded-full text-slate-400"><X className="w-5 h-5" /></button>
+            <h2 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4 text-center lg:text-left">Examination Roadmap</h2>
+          </div>
+          
+          <div className="flex-grow overflow-y-auto custom-scrollbar p-8 pt-4" style={{ height: '0px' }}>
+            <div className="grid grid-cols-5 gap-3 pb-20">
               {session.questions.map((_: any, idx: number) => (
                 <motion.button key={idx} whileHover={{ scale: 1.1 }} onClick={() => { setCurrentIdx(idx); setVisited(prev => new Set([...prev, idx.toString()])); if(window.innerWidth < 1024) setPaletteOpen(false); }} className={`aspect-square rounded-[1rem] flex items-center justify-center font-black text-xs transition-all border-2 ${currentIdx === idx ? 'ring-4 ring-blue-500/10 scale-110 z-10' : ''} ${getPaletteStatus(idx)}`}>{(idx + 1).toString()}</motion.button>
               ))}
             </div>
           </div>
-          <div className="p-10 bg-slate-50 border-t border-slate-100 mt-auto">
-            <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if(confirm("Confirm Final Submission?")) submitExam() }} disabled={isSubmitting} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-3 hover:bg-blue-700 shadow-2xl disabled:opacity-50"><Send className="w-4 h-4" /> Finalize Paper</motion.button>
+
+          <div className="p-8 bg-slate-50 border-t border-slate-100 mt-auto flex-shrink-0">
+            <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if(confirm("Confirm Final Submission?")) handleSubmitButton() }} disabled={isSubmitting} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-3 hover:bg-blue-700 shadow-2xl disabled:opacity-50"><Send className="w-4 h-4" /> Finalize Paper</motion.button>
           </div>
         </aside>
       </div>

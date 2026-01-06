@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarClock, Zap, Trophy, Loader2, Sparkles, AlertTriangle, ArrowRight, Target, Flame, Users, Layers, Lock, Globe, CheckCircle2, ShieldAlert, Clock } from 'lucide-react';
+import { CalendarClock, Zap, Trophy, Loader2, Sparkles, AlertTriangle, ArrowRight, Target, Flame, Users, Layers, Lock, Globe, CheckCircle2, ShieldAlert, Clock, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getDailyChallenge, getUserDailyAttempt } from '../supabase';
+import { getDailyChallenge, getUserDailyAttempt, isSupabaseConfigured } from '../supabase';
 import { Subject, ExamType } from '../types';
 
 const Daily = () => {
@@ -13,13 +13,24 @@ const Daily = () => {
   const [userAttempt, setUserAttempt] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState('');
   const [isLocked, setIsLocked] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline'>('online');
 
-  // Consistent Date Key (YYYY-MM-DD)
-  const today = new Date().toISOString().split('T')[0];
+  // Helper to get consistent local date YYYY-MM-DD
+  const getLocalToday = () => {
+    const d = new Date();
+    // Offset in milliseconds
+    const offsetMs = d.getTimezoneOffset() * 60000;
+    // Local date object
+    const local = new Date(d.getTime() - offsetMs);
+    return local.toISOString().split('T')[0];
+  };
+
+  const today = getLocalToday();
   const userProfile = JSON.parse(localStorage.getItem('user_profile') || '{}');
   const isAdmin = userProfile.role === 'admin';
   
   useEffect(() => {
+    setConnectionStatus(isSupabaseConfigured() ? 'online' : 'offline');
     loadDailyData();
     checkTimeLock();
     
@@ -43,17 +54,16 @@ const Daily = () => {
   }, []);
 
   const checkTimeLock = () => {
-      // Logic: Paper opens at 8:30 AM IST
-      // IST is UTC + 5:30
+      // Logic: Paper opens at 8:30 AM IST (UTC +5:30)
       const now = new Date();
-      
-      // Create date object for Today 8:30 AM IST
-      // We use Indian Standard Time logic
+      // Current Time in IST
       const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      
+      // Target 8:30 AM IST Today
       const openTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
       openTime.setHours(8, 30, 0, 0);
 
-      // If current IST time is less than 8:30 AM, lock it.
+      // Lock logic
       if (istTime.getTime() < openTime.getTime()) {
           setIsLocked(true);
       } else {
@@ -64,7 +74,7 @@ const Daily = () => {
   const loadDailyData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch the Global Paper for Today
+      // 1. Fetch the Global Paper for Today (using local YYYY-MM-DD)
       const dailyData = await getDailyChallenge(today);
       setPaper(dailyData);
 
@@ -87,13 +97,16 @@ const Daily = () => {
         return;
     }
     
+    // Calculate duration: 2.4 mins per question
+    const duration = Math.ceil(paper.questions.length * 2.4);
+
     const sessionData = {
       type: `Daily Mock • ${today}`,
       isDaily: true,        // Flag for ExamPortal
       dailyDate: today,     // Date Key
       questions: paper.questions,
       startTime: Date.now(),
-      durationMinutes: 180 // 3 Hours strict
+      durationMinutes: duration
     };
     
     localStorage.setItem('active_session', JSON.stringify(sessionData));
@@ -122,8 +135,17 @@ const Daily = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      <div className="text-center space-y-4 mb-12">
+    <div className="max-w-6xl mx-auto space-y-8 pb-12 relative">
+      {/* Connection Indicator */}
+      <div className="absolute top-0 right-0 flex items-center gap-2 px-3 py-1.5 bg-white rounded-full border border-slate-200 shadow-sm text-[10px] font-black uppercase tracking-widest">
+         {connectionStatus === 'online' ? (
+             <><Wifi className="w-3 h-3 text-green-500" /><span className="text-slate-500">Connected</span></>
+         ) : (
+             <><WifiOff className="w-3 h-3 text-slate-400" /><span className="text-slate-400">Offline Mode</span></>
+         )}
+      </div>
+
+      <div className="text-center space-y-4 mb-12 pt-6">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-fuchsia-100 text-fuchsia-600 rounded-full mb-4">
            <CalendarClock className="w-4 h-4" />
            <span className="text-xs font-black uppercase tracking-widest">Global Event • {today}</span>
@@ -181,7 +203,7 @@ const Daily = () => {
                            </>
                        ) : (
                            <>
-                              {isLocked ? (
+                              {isLocked && !isAdmin ? (
                                   <>
                                     <div className="flex items-center gap-3 mb-8">
                                         <div className="p-3 bg-red-500/20 rounded-2xl border border-red-500/30">
@@ -226,10 +248,16 @@ const Daily = () => {
                           <h2 className="text-4xl font-black mb-6 leading-tight">
                              Paper Not Released
                           </h2>
-                          <p className="text-slate-400 text-lg leading-relaxed mb-8">
-                             The daily challenge for {today} has not been published by the Admin yet.
+                          <p className="text-slate-400 text-sm leading-relaxed mb-8">
+                             The daily challenge for <span className="text-white font-mono">{today}</span> has not been published by the Admin yet.
                              Please check back later.
                           </p>
+                          <button 
+                             onClick={() => { setPaper(null); loadDailyData(); }}
+                             className="px-6 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-xs flex items-center gap-2 hover:bg-slate-700 transition-colors"
+                          >
+                             <RefreshCw className="w-4 h-4" /> Force Refresh
+                          </button>
                        </>
                    )}
                 </div>
@@ -245,7 +273,7 @@ const Daily = () => {
                               <div className="w-[1px] h-10 bg-white/10"></div>
                               <div>
                                  <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-1">Duration</p>
-                                 <p className="text-3xl font-black text-white">3h</p>
+                                 <p className="text-3xl font-black text-white">{Math.ceil(paper.questions.length * 2.4)}m</p>
                               </div>
                               <div className="w-[1px] h-10 bg-white/10"></div>
                               <div>

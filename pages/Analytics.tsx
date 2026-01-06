@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Award, Target, TrendingUp, Clock, AlertCircle, Sparkles, ChevronRight, BookOpen, Brain, CheckCircle2, XCircle, ChevronDown, ChevronUp, BarChart3, PieChart as PieIcon, Info } from 'lucide-react';
+import { Award, Target, TrendingUp, Clock, AlertCircle, Sparkles, ChevronRight, BookOpen, Brain, CheckCircle2, XCircle, ChevronDown, ChevronUp, BarChart3, PieChart as PieIcon, Info, Download } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getDeepAnalysis } from '../geminiService';
@@ -32,6 +32,185 @@ const Analytics = () => {
     } finally {
       setLoadingAi(false);
     }
+  };
+
+  const handleDownloadReport = () => {
+    if (!result) return;
+
+    const printWindow = window.open('', '', 'height=800,width=900');
+    if (!printWindow) {
+        alert("Pop-up blocked. Please allow pop-ups to download the report.");
+        return;
+    }
+
+    const userProfile = JSON.parse(localStorage.getItem('user_profile') || '{}');
+    const userName = userProfile.full_name || 'Aspirant';
+    const dateStr = new Date(result.completedAt).toLocaleString();
+
+    let contentHtml = '';
+
+    // Sort questions by subject order for cleaner output
+    const sortedQuestions = [...(result.questions || [])].sort((a, b) => {
+        const order = { 'Physics': 1, 'Chemistry': 2, 'Mathematics': 3 };
+        return (order[a.subject as keyof typeof order] || 4) - (order[b.subject as keyof typeof order] || 4);
+    });
+
+    sortedQuestions.forEach((q: any, idx: number) => {
+        const isCorrect = q.isCorrect;
+        const isSkipped = q.userAnswer === undefined || q.userAnswer === '';
+        
+        let statusColor = '#64748b'; // Slate (Skipped)
+        let statusText = 'NOT ATTEMPTED';
+        if (!isSkipped) {
+            statusColor = isCorrect ? '#16a34a' : '#dc2626'; // Green or Red
+            statusText = isCorrect ? 'CORRECT' : 'WRONG';
+        }
+
+        let optionsHtml = '';
+        if (q.type === 'MCQ' && q.options) {
+            optionsHtml = `<div class="options-grid">
+                ${q.options.map((opt: string, i: number) => {
+                    const isUserSel = q.userAnswer?.toString() === i.toString();
+                    const isCorrectSel = q.correctAnswer?.toString() === i.toString();
+                    
+                    let optClass = 'opt';
+                    if (isCorrectSel) optClass += ' opt-correct';
+                    if (isUserSel && !isCorrectSel) optClass += ' opt-wrong';
+                    if (isUserSel && isCorrectSel) optClass += ' opt-user-correct';
+
+                    return `<div class="${optClass}">
+                        <span class="opt-label">${String.fromCharCode(65 + i)})</span> ${opt}
+                        ${isUserSel ? '<span style="margin-left:5px; font-weight:bold;">(You)</span>' : ''}
+                        ${isCorrectSel ? '<span style="float:right; font-weight:bold;">✓</span>' : ''}
+                    </div>`;
+                }).join('')}
+            </div>`;
+        } else {
+            // Numerical
+            optionsHtml = `<div class="numerical-box">
+                <p><strong>Your Answer:</strong> ${isSkipped ? '--' : q.userAnswer}</p>
+                <p><strong>Correct Answer:</strong> ${q.correctAnswer}</p>
+            </div>`;
+        }
+
+        contentHtml += `
+            <div class="q-block">
+                <div class="q-header">
+                    <span class="q-badge">${q.subject}</span>
+                    <span class="q-badge" style="background:#f1f5f9; color:#475569;">${q.type}</span>
+                    <span class="q-status" style="color:${statusColor}; border-color:${statusColor}">${statusText}</span>
+                </div>
+                <div class="q-statement"><strong>Q${idx + 1}.</strong> ${q.statement}</div>
+                ${optionsHtml}
+                <div class="solution-box">
+                    <div class="sol-title">Explanation & Solution:</div>
+                    <div class="sol-body">${q.solution || q.explanation}</div>
+                </div>
+            </div>
+        `;
+    });
+
+    const fullHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Exam Report - ${userName}</title>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+            <style>
+                body { font-family: 'Segoe UI', sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #1e293b; }
+                h1, h2, h3 { margin: 0; }
+                .header { text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
+                .meta { display: flex; justify-content: space-between; margin-top: 15px; font-size: 0.9rem; color: #64748b; font-weight: bold; }
+                .score-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 30px; display: flex; justify-content: space-around; }
+                .sc-item h2 { font-size: 2rem; color: #0f172a; }
+                .sc-item p { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+                
+                .q-block { margin-bottom: 30px; border: 1px solid #e2e8f0; padding: 25px; border-radius: 16px; page-break-inside: avoid; }
+                .q-header { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+                .q-badge { font-size: 0.7rem; font-weight: bold; text-transform: uppercase; background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 6px; }
+                .q-status { margin-left: auto; font-size: 0.7rem; font-weight: bold; border: 1px solid; padding: 4px 8px; border-radius: 6px; }
+                
+                .q-statement { font-size: 1.05rem; margin-bottom: 20px; line-height: 1.6; }
+                
+                .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+                .opt { padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; }
+                .opt-label { font-weight: bold; margin-right: 5px; }
+                .opt-correct { background-color: #dcfce7; border-color: #86efac; color: #14532d; }
+                .opt-wrong { background-color: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
+                .opt-user-correct { background-color: #dcfce7; border-color: #16a34a; border-width: 2px; }
+                
+                .numerical-box { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px dashed #cbd5e1; }
+                
+                .solution-box { margin-top: 20px; background: #f0f9ff; padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6; }
+                .sol-title { font-weight: bold; font-size: 0.8rem; text-transform: uppercase; color: #1e40af; margin-bottom: 10px; }
+                .sol-body { font-size: 0.95rem; line-height: 1.6; }
+                
+                /* Math specific styles */
+                .katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
+                .katex { font-size: 1.1em; }
+
+                @media print {
+                    body { padding: 0; }
+                    .no-print { display: none; }
+                    .q-block { break-inside: avoid; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>JEE Nexus Analysis Report</h1>
+                <div class="meta">
+                    <span>Candidate: ${userName}</span>
+                    <span>Date: ${dateStr}</span>
+                    <span>Exam ID: ${result.id?.substring(0,8).toUpperCase()}</span>
+                </div>
+            </div>
+
+            <div class="score-card">
+                <div class="sc-item">
+                    <h2>${result.score} / ${result.totalPossible}</h2>
+                    <p>Total Score</p>
+                </div>
+                <div class="sc-item">
+                    <h2>${result.accuracy}%</h2>
+                    <p>Accuracy</p>
+                </div>
+                <div class="sc-item">
+                    <h2>${sortedQuestions.length}</h2>
+                    <p>Questions</p>
+                </div>
+            </div>
+
+            <div class="questions-list">
+                ${contentHtml}
+            </div>
+
+            <script>
+                document.addEventListener("DOMContentLoaded", function() {
+                    renderMathInElement(document.body, {
+                      delimiters: [
+                          {left: '$$', right: '$$', display: true},
+                          {left: '$', right: '$', display: false},
+                          {left: '\\(', right: '\\)', display: false},
+                          {left: '\\[', right: '\\]', display: true}
+                      ],
+                      throwOnError : false,
+                      trust: true
+                    });
+                    setTimeout(() => {
+                        window.print();
+                    }, 1500);
+                });
+            </script>
+        </body>
+        </html>
+    `;
+
+    printWindow.document.write(fullHtml);
+    printWindow.document.close();
   };
 
   if (!result) return (
@@ -69,7 +248,15 @@ const Analytics = () => {
           <p className="text-slate-500 font-medium">Attempt ID: <span className="text-slate-900 font-black">NEX-#{result.id?.substring(0,6) || 'GEN'}</span> • {result.type}</p>
         </div>
         
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-4">
+           <button 
+             onClick={handleDownloadReport}
+             className="px-6 py-5 bg-white text-slate-700 border-2 border-slate-100 rounded-[2rem] font-bold hover:bg-slate-50 hover:border-slate-200 transition-all flex items-center gap-2"
+             title="Download PDF Report"
+           >
+             <Download className="w-5 h-5" />
+             <span className="hidden sm:inline">Download Paper</span>
+           </button>
            <button 
              onClick={() => setShowReview(!showReview)}
              className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] font-black shadow-2xl shadow-slate-200 hover:bg-slate-800 transition-all flex items-center gap-3 active:scale-95"

@@ -38,6 +38,8 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
+export const isSupabaseConfigured = () => !!supabase;
+
 // --- LOCAL STORAGE MOCK HELPERS ---
 // Used as fallback if Supabase connection fails or for offline resilience
 
@@ -160,8 +162,14 @@ export const updateProfileStatus = async (userId: string, status: string) => {
     setLocal('nexus_profiles', profiles.map((p: any) => p.id === userId ? { ...p, status } : p));
     return null;
   }
-  const { error } = await supabase.from('profiles').update({ status }).eq('id', userId);
-  return error ? error.message : null;
+  // IMPORTANT: Use select() to ensure the row was actually found and updated
+  const { data, error } = await supabase.from('profiles').update({ status }).eq('id', userId).select();
+  
+  if (error) return error.message;
+  // If no data returned, it means the row wasn't found OR RLS blocked the update
+  if (!data || data.length === 0) return "Update failed: Permission denied or User Profile not found. Are you logged in as an Admin in the database?";
+  
+  return null;
 };
 
 export const deleteProfile = async (userId: string) => {
@@ -194,23 +202,25 @@ export const getAllDailyChallenges = async () => {
 
 export const createDailyChallenge = async (date: string, questions: any[]) => {
   const newChallenge = { date: date, questions: questions, created_at: new Date().toISOString() };
+  
   if (!supabase) {
     const papers = getLocal('nexus_daily_challenges');
     const existingIdx = papers.findIndex((p: any) => p.date === date);
     if (existingIdx >= 0) {
-        // Overwrite if requested (handled by UI logic mostly, but here for safety)
         papers[existingIdx] = newChallenge;
     } else {
         papers.push(newChallenge);
     }
     setLocal('nexus_daily_challenges', papers);
-    return newChallenge;
+    return { data: newChallenge, error: null };
   }
+  
   try {
     const { data, error } = await supabase.from('daily_challenges').upsert(newChallenge, { onConflict: 'date' }).select().single();
-    if (error) throw error;
-    return data;
-  } catch (e) { return null; }
+    return { data, error };
+  } catch (e) { 
+    return { data: null, error: e }; 
+  }
 };
 
 export const submitDailyAttempt = async (userId: string, date: string, score: number, total: number, stats: any, attemptData: any[]) => {

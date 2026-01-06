@@ -1,6 +1,8 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import * as serviceWorkerRegistration from './serviceWorkerRegistration';
 
 const rootElement = document.getElementById('root');
 
@@ -14,6 +16,9 @@ if (!rootElement) {
         <App />
       </React.StrictMode>
     );
+    
+    // Register PWA Service Worker
+    serviceWorkerRegistration.register();
   } catch (err) {
     console.error("FAILED TO RENDER APP:", err);
     rootElement.innerHTML = `

@@ -37,11 +37,11 @@ This guide covers setting up the project locally, deploying to GitHub/Netlify, a
 ## 3. Backend (Supabase) Setup
 
 1.  Create a new project in [Supabase](https://supabase.com).
-2.  Go to the **SQL Editor** and run the following script to create the necessary tables:
+2.  Go to the **SQL Editor** and run the following script to create the necessary tables, triggers, and permissions. **Run this entire block at once.**
 
 ```sql
--- 1. Profiles Table (Extends Auth)
-create table profiles (
+-- 1. SETUP PROFILES TABLE (Extends Auth)
+create table if not exists public.profiles (
   id uuid references auth.users on delete cascade not null primary key,
   email text unique not null,
   full_name text,
@@ -50,9 +50,40 @@ create table profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 2. Questions Bank
-create table questions (
-  id uuid default uuid_generate_v4() primary key,
+-- 2. ENABLE ROW LEVEL SECURITY
+alter table public.profiles enable row level security;
+
+-- 3. RESET PROFILE POLICIES (Fixes Permissions)
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+create policy "Public profiles are viewable by everyone" on profiles for select using (true);
+
+drop policy if exists "Users can update own profile" on profiles;
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+-- CRITICAL FIX: Allow Admins to update ANY profile (Fixes "Approve Not Working")
+drop policy if exists "Admins can update all profiles" on profiles;
+create policy "Admins can update all profiles" on profiles for update using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- 4. AUTO-CREATE PROFILE TRIGGER (Fixes "New Users Not Appearing")
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, role, status)
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending');
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- 5. QUESTIONS BANK
+create table if not exists public.questions (
+  id uuid default gen_random_uuid() primary key,
   subject text not null,
   chapter text,
   type text check (type in ('MCQ', 'Numerical')),
@@ -66,18 +97,22 @@ create table questions (
   "markingScheme" jsonb default '{"positive": 4, "negative": 1}',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+alter table public.questions enable row level security;
+create policy "Read questions" on questions for select using (true);
+create policy "Insert questions" on questions for insert with check (true);
 
--- 3. Daily Challenges (One paper per day)
-create table daily_challenges (
+-- 6. DAILY CHALLENGES (One paper per day)
+create table if not exists public.daily_challenges (
   date date primary key, -- YYYY-MM-DD
   questions jsonb not null, -- Array of question objects
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+alter table public.daily_challenges enable row level security;
 
--- 4. Daily Attempts (Student submissions)
-create table daily_attempts (
-  user_id uuid references profiles(id) on delete cascade not null,
-  date date references daily_challenges(date) on delete cascade not null,
+-- 7. DAILY ATTEMPTS (Student submissions)
+create table if not exists public.daily_attempts (
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  date date references public.daily_challenges(date) on delete cascade not null,
   score integer,
   total_marks integer,
   stats jsonb, -- { accuracy, timeTaken, etc }
@@ -85,20 +120,28 @@ create table daily_attempts (
   submitted_at timestamp with time zone default timezone('utc'::text, now()) not null,
   primary key (user_id, date)
 );
+alter table public.daily_attempts enable row level security;
 
--- 5. Enable Row Level Security (RLS) - Optional but recommended
-alter table profiles enable row level security;
-alter table questions enable row level security;
-alter table daily_challenges enable row level security;
-alter table daily_attempts enable row level security;
+-- 8. POLICIES FOR EXAM DATA
+drop policy if exists "Public Read Daily" on daily_challenges;
+create policy "Public Read Daily" on daily_challenges for select using (true);
 
--- Simple Policies (Adjust for production)
-create policy "Public profiles are viewable by everyone" on profiles for select using (true);
-create policy "Users can insert their own profile" on profiles for insert with check (auth.uid() = id);
-create policy "Read questions" on questions for select using (true);
-create policy "Read daily challenges" on daily_challenges for select using (true);
-create policy "Insert attempts" on daily_attempts for insert with check (auth.uid() = user_id);
-create policy "Read own attempts" on daily_attempts for select using (auth.uid() = user_id);
+drop policy if exists "Public Insert Daily" on daily_challenges;
+create policy "Public Insert Daily" on daily_challenges for insert with check (true);
+
+drop policy if exists "Public Update Daily" on daily_challenges;
+create policy "Public Update Daily" on daily_challenges for update using (true);
+
+drop policy if exists "Users can insert own attempts" on daily_attempts;
+create policy "Users can insert own attempts" on daily_attempts for insert with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view own attempts" on daily_attempts;
+create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
+
+drop policy if exists "Admins view all attempts" on daily_attempts;
+create policy "Admins view all attempts" on daily_attempts for select using ( 
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
 ```
 
 3.  **Authentication Settings**:
