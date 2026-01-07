@@ -1,5 +1,5 @@
 
-import { Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
 import { NCERT_CHAPTERS } from "./constants";
 
@@ -188,7 +188,7 @@ const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
         if (currentProvider === 'google') {
             // Check if user has a custom Google Key
             if (currentConfig.apiKey) {
-                const { GoogleGenAI } = await import("@google/genai");
+                // Static import usage
                 const ai = new GoogleGenAI({ apiKey: currentConfig.apiKey });
                 return await ai.models.generateContent({
                     model: params.model, // Use the passed model (usually default or configured)
