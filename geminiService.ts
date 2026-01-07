@@ -12,16 +12,24 @@ const getModelConfig = () => {
 };
 
 const config = getModelConfig();
+
+// Helper to sanitize models (prevent sticking to deprecated/limited models like 2.0-flash-exp)
+const validateModel = (model: string | undefined, defaultModel: string) => {
+    if (!model) return defaultModel;
+    // Forcefully fallback if deprecated/experimental model causing 429s is found
+    if (model.includes("2.0-flash-exp")) return defaultModel; 
+    return model;
+};
+
 // Legacy fallback or new fields
 const PROVIDER = config.provider || 'google'; 
 // API Key is handled via process.env.API_KEY for Google, but keeping legacy fallback for other providers
 const BASE_URL = config.baseUrl || '';
-// User requested gemini-3.0-preview everywhere. Mapping to available preview tag.
-const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview"; 
 
-// Constants for Google
-const VISION_MODEL = config.visionModel || "gemini-3-flash-preview"; 
-const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
+// Constants for Google (with Sanitization)
+const MODEL_ID = validateModel(config.modelId || config.genModel, "gemini-3-flash-preview");
+const VISION_MODEL = validateModel(config.visionModel, "gemini-3-flash-preview"); 
+const ANALYSIS_MODEL = validateModel(config.analysisModel, "gemini-3-flash-preview");
 
 // Robust Key Retrieval for Vite & Standard Envs
 const getApiKey = () => {
@@ -111,7 +119,7 @@ const callAIProxy = async (params: any) => {
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
             const data = await response.json();
-            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText };
+            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText, details: data.error };
             return data;
         } else {
             const text = await response.text();
@@ -239,11 +247,36 @@ const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
             return await callOpenAICompatible(params, providerParams);
         }
     } catch (e: any) {
-        console.warn("AI Generation Error:", e);
-        if (retries > 0) {
-            // Backoff strategy for rate limits
-            await delay(4000); 
-            return safeGenerateContent(params, retries - 1);
+        // Smart Error Handling for 429 (Resource Exhausted)
+        // Extract retry delay from message if available "Please retry in 51.59s"
+        const isQuotaError = e.status === 429 || e.code === 429 || (e.error && e.error.code === 429) || (e.message && e.message.includes('429'));
+        
+        if (isQuotaError) {
+            console.warn("Quota exceeded (429). Initiating backoff...");
+            let waitTime = 10000; // Default 10s base wait
+            
+            if (e.message) {
+                const match = e.message.match(/retry in (\d+(\.\d+)?)s/);
+                if (match) {
+                    waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 1500; // Exact wait + 1.5s buffer
+                }
+            }
+            
+            // Cap wait time to 60s to prevent infinite hangs, unless retrying
+            waitTime = Math.min(waitTime, 60000);
+            
+            if (retries > 0) {
+                console.log(`Waiting ${Math.round(waitTime/1000)}s before retry...`);
+                await delay(waitTime);
+                return safeGenerateContent(params, retries - 1);
+            }
+        } else {
+            console.warn("AI Generation Error:", e);
+            if (retries > 0) {
+                // Standard backoff for other errors (500s, timeouts)
+                await delay(4000); 
+                return safeGenerateContent(params, retries - 1);
+            }
         }
         throw e;
     }
