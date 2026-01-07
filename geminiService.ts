@@ -12,7 +12,13 @@ const getModelConfig = () => {
 };
 
 const config = getModelConfig();
-const GEN_MODEL = config.genModel || "gemini-3-flash-preview"; 
+// Legacy fallback or new fields
+const PROVIDER = config.provider || 'google'; 
+const API_KEY = config.apiKey || ''; 
+const BASE_URL = config.baseUrl || '';
+const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview"; 
+
+// Constants for Google
 const VISION_MODEL = config.visionModel || "gemini-2.5-flash-image"; 
 const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
 
@@ -23,8 +29,9 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.readAsDataURL(file);
     reader.onload = () => {
       const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      resolve(base64);
+      // OpenAI needs full data url for image_url, Gemini needs raw base64
+      // We will resolve with full data URL and split if needed
+      resolve(result);
     };
     reader.onerror = error => reject(error);
   });
@@ -49,38 +56,23 @@ const cleanAndParseJSON = (text: string) => {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Calls the Netlify Proxy Function instead of Google directly.
- * This hides the API Key and enforces backend rate limiting.
+ * Calls the Netlify Proxy Function (Google Only)
  */
 const callAIProxy = async (params: any) => {
     try {
         const response = await fetch('/.netlify/functions/ai-proxy', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-
         const contentType = response.headers.get("content-type");
-        
-        // Handle JSON responses (Success or JSON Errors)
         if (contentType && contentType.includes("application/json")) {
             const data = await response.json();
-            if (!response.ok) {
-                throw {
-                    status: response.status,
-                    message: data.error?.message || response.statusText
-                };
-            }
+            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText };
             return data;
         } else {
-            // Handle HTML/Text responses (e.g., 502 Bad Gateway, 404 Not Found)
             const text = await response.text();
-            throw {
-                status: response.status,
-                message: `Proxy connection failed (${response.status}). Ensure the backend function is running. Details: ${text.substring(0, 100)}`
-            };
+            throw { status: response.status, message: `Proxy connection failed: ${text.substring(0, 100)}` };
         }
     } catch (error: any) {
         console.error("Proxy Call Failed:", error);
@@ -89,55 +81,138 @@ const callAIProxy = async (params: any) => {
 };
 
 /**
- * Wrapper for API calls with automatic retry logic for 429 errors.
- * Includes intelligent model switching to avoid quota exhaustion.
+ * OpenAI Compatible API Call (DeepSeek, ChatGPT, etc.)
  */
-const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
-    try {
-        return await callAIProxy(params);
-    } catch (e: any) {
-        const isRateLimit = e.status === 429 || 
-                            e.message?.includes('429') || 
-                            e.message?.includes('Quota') || 
-                            e.message?.includes('Rate limit');
-        
-        const isModelError = e.status === 404 || e.status === 503;
+const callOpenAICompatible = async (params: any, providerConfig: any) => {
+    if (!providerConfig.apiKey) throw new Error("API Key is required for non-Google providers. Please configure in Admin > System Settings.");
+    
+    const messages = [];
+    let systemPrompt = "";
 
-        if ((isRateLimit || isModelError) && retries > 0) {
-            console.warn(`AI Error (${e.status || 'Quota'}). Retrying... (${retries} attempts left)`);
-            
-            // Exponential backoff: 4s, 8s, 12s
-            await delay(4000 * (4 - retries));
+    // 1. Handle Config/System Prompt
+    if (params.config?.systemInstruction) {
+        systemPrompt += params.config.systemInstruction;
+    }
 
-            let nextParams = { ...params };
+    // 2. Handle Schema (Translate Google Schema to Text Instruction)
+    if (params.config?.responseSchema) {
+        systemPrompt += "\n\nCRITICAL: You must output a valid JSON object matching this structure. Do not include markdown formatting.\n";
+        systemPrompt += "Expected JSON Structure: " + JSON.stringify(params.config.responseSchema, null, 2);
+    }
 
-            // Intelligent Model Switching strategy
-            if (isRateLimit || isModelError) {
-                const currentModel = nextParams.model;
-                let fallbackModel = '';
+    if (systemPrompt) {
+        messages.push({ role: "system", content: systemPrompt });
+    }
 
-                if (currentModel === 'gemini-3-flash-preview') {
-                    fallbackModel = 'gemini-2.0-flash-lite-preview-02-05';
-                } else if (currentModel === 'gemini-2.5-flash-image') {
-                    fallbackModel = 'gemini-2.0-flash';
-                } else if (currentModel === 'gemini-2.0-flash') {
-                    fallbackModel = 'gemini-2.0-flash-lite-preview-02-05';
-                }
+    // 3. Handle Contents (Text or Image)
+    const content = params.contents;
+    let userMessageContent: any = "";
 
-                if (fallbackModel && fallbackModel !== currentModel) {
-                    console.warn(`Switching model from ${currentModel} to ${fallbackModel} due to error.`);
-                    nextParams.model = fallbackModel;
+    // Check if simple string
+    if (typeof content === 'string') {
+        userMessageContent = content;
+    } 
+    // Check if Object with parts (Gemini style)
+    else if (content.parts) {
+        if (content.parts.length === 1 && content.parts[0].text) {
+            userMessageContent = content.parts[0].text;
+        } else {
+            // Multimodal conversion
+            userMessageContent = [];
+            for (const part of content.parts) {
+                if (part.text) {
+                    userMessageContent.push({ type: "text", text: part.text });
+                } else if (part.inlineData) {
+                    // Gemini uses raw base64 in inlineData.data
+                    // OpenAI needs "data:image/jpeg;base64,..."
+                    const mime = part.inlineData.mimeType;
+                    const b64 = part.inlineData.data;
+                    userMessageContent.push({ 
+                        type: "image_url", 
+                        image_url: { url: `data:${mime};base64,${b64}` } 
+                    });
                 }
             }
-            
-            return safeGenerateContent(nextParams, retries - 1);
         }
-        
+    }
+
+    messages.push({ role: "user", content: userMessageContent });
+
+    const payload: any = {
+        model: providerConfig.modelId,
+        messages: messages,
+        temperature: params.config?.temperature || 0.7,
+    };
+
+    // DeepSeek/OpenAI JSON Mode
+    if (params.config?.responseMimeType === "application/json") {
+        payload.response_format = { type: "json_object" };
+    }
+
+    const response = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${providerConfig.apiKey}`
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`${providerConfig.provider} API Error: ${err}`);
+    }
+
+    const data = await response.json();
+    
+    // Normalize to Gemini Candidate Structure for compatibility
+    const textOutput = data.choices[0]?.message?.content || "";
+    return {
+        candidates: [{
+            content: {
+                parts: [{ text: textOutput }]
+            }
+        }]
+    };
+};
+
+/**
+ * Main Wrapper
+ */
+const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
+    // Reload config on every call to ensure latest settings
+    const currentConfig = getModelConfig();
+    const currentProvider = currentConfig.provider || 'google';
+    
+    try {
+        if (currentProvider === 'google') {
+            // Check if user has a custom Google Key
+            if (currentConfig.apiKey) {
+                const { GoogleGenAI } = await import("@google/genai");
+                const ai = new GoogleGenAI({ apiKey: currentConfig.apiKey });
+                return await ai.models.generateContent({
+                    model: params.model, // Use the passed model (usually default or configured)
+                    contents: params.contents,
+                    config: params.config
+                });
+            }
+            return await callAIProxy(params);
+        } else {
+            // Override model with provider specific model from config
+            const providerParams = { ...currentConfig, provider: currentProvider };
+            return await callOpenAICompatible(params, providerParams);
+        }
+    } catch (e: any) {
+        console.warn("AI Generation Error:", e);
+        if (retries > 0) {
+            await delay(2000);
+            return safeGenerateContent(params, retries - 1);
+        }
         throw e;
     }
 };
 
-// Helper to extract text from Raw JSON response (Proxy doesn't return SDK object with getters)
+// Helper to extract text from Raw JSON response (Proxy or Adapter)
 const extractText = (response: any): string => {
     try {
         if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
@@ -149,7 +224,7 @@ const extractText = (response: any): string => {
     }
 };
 
-// Define response schema
+// Define response schema (Used for Google, translated for others)
 const questionSchema = {
   type: Type.ARRAY,
   items: {
@@ -180,7 +255,7 @@ const questionSchema = {
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
     const response = await safeGenerateContent({
-      model: GEN_MODEL,
+      model: MODEL_ID, // Use configured model
       contents: `Provide a single, very short conceptual hint (max 15 words) for this ${subject} question. Do NOT solve it. Do NOT give formulas. Just the starting concept. Question: ${statement.substring(0, 300)}...`
     });
     return extractText(response) || "Recall basic principles.";
@@ -192,7 +267,7 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 export const refineQuestionText = async (text: string): Promise<string> => {
   try {
     const response = await safeGenerateContent({
-      model: GEN_MODEL,
+      model: MODEL_ID,
       contents: `Fix grammar and clarity of this JEE question text. Keep LaTeX math ($...$) intact. Text: ${text}`
     });
     return extractText(response) || text;
@@ -265,7 +340,7 @@ export const generateJEEQuestions = async (
 
   try {
     const response = await safeGenerateContent({
-      model: GEN_MODEL,
+      model: MODEL_ID,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -313,12 +388,39 @@ export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): P
 };
 
 export const parseDocumentToQuestions = async (questionFile: File, solutionFile?: File): Promise<Question[]> => {
-  const qBase64 = await fileToBase64(questionFile);
-  const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qBase64 } }];
+  const qBase64DataUrl = await fileToBase64(questionFile);
+  const parts: any[] = [];
 
-  if (solutionFile) {
-    const sBase64 = await fileToBase64(solutionFile);
-    parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
+  // For Gemini: Extract base64 from data URL (data:image/png;base64,ABC...) -> ABC...
+  // For OpenAI: Use full data URL
+  
+  const currentProvider = config.provider || 'google';
+  
+  if (currentProvider === 'google') {
+      // Gemini Format
+      const qBase64 = qBase64DataUrl.split(',')[1];
+      parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
+      
+      if (solutionFile) {
+        const sBase64DataUrl = await fileToBase64(solutionFile);
+        const sBase64 = sBase64DataUrl.split(',')[1];
+        parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
+      }
+  } else {
+      // OpenAI/DeepSeek Format (handled in adapter, pass full structure)
+      // We pass it as "inlineData" with a special flag or just handle it in the adapter by checking if 'data:' exists?
+      // Actually, we can reuse the Gemini structure structure but keep the full DataURL in the 'data' field 
+      // if we are lazy, BUT the adapter expects specific logic.
+      
+      // Let's stick to Gemini format here, and let the adapter reconstruct the Data URL if needed.
+      const qBase64 = qBase64DataUrl.split(',')[1];
+      parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
+      
+      if (solutionFile) {
+        const sBase64DataUrl = await fileToBase64(solutionFile);
+        const sBase64 = sBase64DataUrl.split(',')[1];
+        parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
+      }
   }
 
   const prompt = `Extract every question from these documents into a structured JSON array. Ensure LaTeX format for math ($...$). Escape backslashes properly.`;
@@ -332,7 +434,7 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 
   try {
     const response = await safeGenerateContent({
-      model: VISION_MODEL,
+      model: MODEL_ID, // Ensure model supports vision (e.g. gpt-4o, gemini-flash)
       contents: { parts: [...parts, { text: prompt }] },
       config: { responseMimeType: "application/json", safetySettings: safetySettings }
     });
@@ -364,7 +466,7 @@ export const getDeepAnalysis = async (result: any) => {
     try {
         const prompt = `Analyze these JEE mock results: ${JSON.stringify(result)}. Provide deep pedagogical feedback.`;
         const response = await safeGenerateContent({
-            model: ANALYSIS_MODEL,
+            model: MODEL_ID,
             contents: prompt
         });
         return extractText(response) || "Summary not available.";
