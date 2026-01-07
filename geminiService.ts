@@ -62,16 +62,26 @@ const callAIProxy = async (params: any) => {
             body: JSON.stringify(params)
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
+        const contentType = response.headers.get("content-type");
+        
+        // Handle JSON responses (Success or JSON Errors)
+        if (contentType && contentType.includes("application/json")) {
+            const data = await response.json();
+            if (!response.ok) {
+                throw {
+                    status: response.status,
+                    message: data.error?.message || response.statusText
+                };
+            }
+            return data;
+        } else {
+            // Handle HTML/Text responses (e.g., 502 Bad Gateway, 404 Not Found)
+            const text = await response.text();
             throw {
                 status: response.status,
-                message: data.error?.message || response.statusText
+                message: `Proxy connection failed (${response.status}). Ensure the backend function is running. Details: ${text.substring(0, 100)}`
             };
         }
-
-        return data;
     } catch (error: any) {
         console.error("Proxy Call Failed:", error);
         throw error;

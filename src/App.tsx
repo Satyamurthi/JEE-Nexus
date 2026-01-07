@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, Suspense, Component } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
@@ -29,7 +28,7 @@ interface ErrorBoundaryState {
 }
 
 // Change: Updated NetworkErrorBoundary to explicitly extend Component to fix type errors regarding setState and props.
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
