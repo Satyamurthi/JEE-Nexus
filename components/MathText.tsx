@@ -1,5 +1,4 @@
-
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 
 interface MathTextProps {
   text: string;
@@ -13,21 +12,6 @@ interface MathTextProps {
  * Supports $...$, $$...$$, \(...\), \[...\], and generic \begin{env}...\end{env} blocks.
  */
 const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false }) => {
-  // Ensure we react to KaTeX loading if it comes in late (defer script)
-  const [katexReady, setKatexReady] = useState(!!(window as any).katex);
-
-  useEffect(() => {
-    if (!katexReady) {
-      const check = setInterval(() => {
-        if ((window as any).katex) {
-          setKatexReady(true);
-          clearInterval(check);
-        }
-      }, 100);
-      return () => clearInterval(check);
-    }
-  }, [katexReady]);
-
   const htmlContent = useMemo(() => {
     if (!text) return '';
 
@@ -108,7 +92,7 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
       console.warn("Math processing error:", e);
       return text.replace(/\n/g, '<br/>');
     }
-  }, [text, isBlock, katexReady]); // Re-run when katex loads
+  }, [text, isBlock]);
 
   return (
     <div 
