@@ -197,7 +197,8 @@ const Analytics = () => {
                           {left: '\\[', right: '\\]', display: true}
                       ],
                       throwOnError : false,
-                      trust: true
+                      trust: true,
+                      strict: false
                     });
                     setTimeout(() => {
                         window.print();
@@ -208,6 +209,7 @@ const Analytics = () => {
         </html>
     `;
 
+    printWindow.document.open(); // CRITICAL for correct doctype parsing
     printWindow.document.write(fullHtml);
     printWindow.document.close();
   };
@@ -224,6 +226,8 @@ const Analytics = () => {
     </div>
   );
 
+  // ... rest of the file content ...
+  
   const subjectData = [
     { name: 'Physics', score: result.questions?.filter((q: any) => q.subject === 'Physics' && q.isCorrect).length * 4 || 0 },
     { name: 'Chemistry', score: result.questions?.filter((q: any) => q.subject === 'Chemistry' && q.isCorrect).length * 4 || 0 },
@@ -431,133 +435,6 @@ const Analytics = () => {
                  <button className="w-full py-5 bg-white text-purple-900 rounded-2xl font-black text-sm shadow-xl shadow-purple-900/20 hover:scale-[1.02] active:scale-95 transition-all">Start Revision Drill</button>
               </div>
             </div>
-          </div>
-        </div>
-      ) : (
-        <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-10 duration-500">
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-premium flex items-center justify-between">
-             <div className="flex gap-12">
-                <div className="flex items-center gap-3">
-                   <CheckCircle2 className="w-6 h-6 text-emerald-500" />
-                   <div className="flex flex-col">
-                     <span className="text-xl font-black text-slate-900">{result.questions?.filter((q: any) => q.isCorrect).length}</span>
-                     <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Correct</span>
-                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                   <XCircle className="w-6 h-6 text-red-500" />
-                   <div className="flex flex-col">
-                     <span className="text-xl font-black text-slate-900">{result.questions?.filter((q: any) => q.userAnswer !== undefined && !q.isCorrect).length}</span>
-                     <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Incorrect</span>
-                   </div>
-                </div>
-             </div>
-             <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] hidden sm:block">Full Solution Explorer v2.0</p>
-          </div>
-
-          <div className="space-y-6">
-            {result.questions?.map((q: any, idx: number) => (
-              <motion.div 
-                key={idx} 
-                layout
-                className="bg-white rounded-[2.5rem] border border-slate-100 shadow-premium overflow-hidden transition-all hover:border-blue-200"
-              >
-                <div 
-                  className="p-10 cursor-pointer hover:bg-slate-50 transition-all"
-                  onClick={() => setExpandedQuestion(expandedQuestion === idx ? null : idx)}
-                >
-                  <div className="flex items-start justify-between gap-10">
-                     <div className="flex-1">
-                        <div className="flex items-center gap-5 mb-6">
-                           <span className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black ${q.isCorrect ? 'bg-emerald-100 text-emerald-700 shadow-lg shadow-emerald-50' : q.userAnswer === undefined ? 'bg-slate-100 text-slate-400' : 'bg-red-100 text-red-700 shadow-lg shadow-red-50'}`}>
-                              {idx + 1}
-                           </span>
-                           <div className="flex flex-col">
-                             <span className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">{q.subject} • {q.type}</span>
-                             <span className="text-xs font-bold text-slate-900 mt-1">{q.concept}</span>
-                           </div>
-                        </div>
-                        <MathText text={q.statement} className="text-xl font-medium text-slate-800 leading-[1.6]" />
-                     </div>
-                     <div className="shrink-0 pt-4">
-                        {expandedQuestion === idx ? <ChevronUp className="w-6 h-6 text-slate-300" /> : <ChevronDown className="w-6 h-6 text-slate-300" />}
-                     </div>
-                  </div>
-                </div>
-
-                <AnimatePresence>
-                  {expandedQuestion === idx && (
-                    <motion.div 
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-                    >
-                      <div className="px-10 pb-12 pt-4 border-t border-slate-50 bg-[#fdfdfe]">
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
-                            <div className="space-y-6">
-                               <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-3">Option Analysis</h5>
-                               {q.type === 'MCQ' ? (
-                                 <div className="space-y-3">
-                                   {q.options.map((opt: string, i: number) => (
-                                     <div 
-                                       key={i} 
-                                       className={`p-6 rounded-2xl border-2 text-sm flex items-center gap-6 transition-all ${
-                                         i.toString() === q.correctAnswer.toString() 
-                                         ? 'bg-emerald-50 border-emerald-200 text-emerald-900 font-bold shadow-xl shadow-emerald-50 scale-[1.02]' 
-                                         : i.toString() === q.userAnswer?.toString()
-                                         ? 'bg-red-50 border-red-200 text-red-900 font-bold'
-                                         : 'bg-white border-slate-100 text-slate-600'
-                                       }`}
-                                     >
-                                       <span className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shadow-sm ${i.toString() === q.correctAnswer.toString() ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{String.fromCharCode(65 + i)}</span>
-                                       <MathText text={opt} className="flex-1" />
-                                     </div>
-                                   ))}
-                                 </div>
-                               ) : (
-                                 <div className="space-y-6">
-                                    <div className="p-8 bg-emerald-50 border-2 border-emerald-200 rounded-[2rem] shadow-lg shadow-emerald-50">
-                                       <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest mb-3">Target Solution</p>
-                                       <MathText text={String(q.correctAnswer)} className="text-4xl font-black text-emerald-900" />
-                                    </div>
-                                    <div className={`p-8 border-2 rounded-[2rem] ${q.isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200 shadow-lg shadow-red-50'}`}>
-                                       <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${q.isCorrect ? 'text-emerald-600' : 'text-red-600'}`}>Aspirant Input</p>
-                                       <MathText text={String(q.userAnswer || 'N/A')} className={`text-4xl font-black ${q.isCorrect ? 'text-emerald-900' : 'text-red-900'}`} />
-                                    </div>
-                                 </div>
-                               )}
-                            </div>
-
-                            <div className="space-y-6">
-                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-3">Expert Explanation</h5>
-                              <div className="p-8 bg-white border-2 border-slate-50 rounded-[2.5rem] shadow-premium">
-                                 <div className="flex items-center gap-4 mb-6">
-                                   <div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><Brain className="w-5 h-5" /></div>
-                                   <span className="text-sm font-black text-slate-800 tracking-tight leading-none uppercase">{q.concept}</span>
-                                 </div>
-                                 <MathText text={q.explanation} className="text-sm text-slate-500 leading-relaxed font-medium" />
-                              </div>
-                            </div>
-                         </div>
-
-                         <div className="p-12 bg-blue-50 rounded-[3rem] border-2 border-blue-100 relative group overflow-hidden">
-                            <div className="absolute -bottom-10 -right-10 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-1000">
-                               <Sparkles className="w-48 h-48 text-blue-900" />
-                            </div>
-                            <h4 className="text-xs font-black text-blue-900 mb-8 flex items-center gap-3 uppercase tracking-[0.2em]">
-                               Step-by-Step Working & Solution
-                            </h4>
-                            <div className="prose prose-blue max-w-none text-blue-900/80 font-medium text-lg leading-[1.8]">
-                               <MathText text={q.solution} className="math-font whitespace-pre-wrap" />
-                            </div>
-                         </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            ))}
           </div>
         </div>
       )}

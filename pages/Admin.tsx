@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Plus, RefreshCw, Search, UserCheck, UserX, Loader2, Users, Crown, Mail, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, ExternalLink, CloudOff, Activity, MoreHorizontal, X, Save, Eye, EyeOff, CheckCircle2, ChevronDown, UserPlus, Database, Calendar, CalendarClock, RotateCcw, Medal, FileUp, FileText, AlertTriangle, ArrowRight, XCircle, Key, Lock, Server, Sparkles, Sliders, Atom, Beaker, FunctionSquare, Layers, Cpu, Dices, Printer, Download, Terminal, FileSpreadsheet } from 'lucide-react';
 import { getAllProfiles, updateProfileStatus, deleteProfile, saveQuestionsToDB, supabase, getAllDailyChallenges, createDailyChallenge, seedMockData, getDailyAttempts } from '../supabase';
@@ -10,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 type UserStatus = 'all' | 'pending' | 'approved' | 'rejected';
 
+// ... (Existing interfaces and helper components remain unchanged) ...
 interface SubjectConfig {
     mcq: number;
     numerical: number;
@@ -343,6 +345,7 @@ const SubjectConfigModal = ({
 };
 
 const Admin = () => {
+  // ... (State and other methods same as before, truncated for brevity)
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('Daily Paper Upload');
   const [users, setUsers] = useState<any[]>([]);
@@ -500,6 +503,7 @@ const Admin = () => {
   const handlePrintAnalysis = () => {
       const printWindow = window.open('', '', 'height=800,width=1200');
       if (printWindow && printRef.current) {
+          printWindow.document.open();
           printWindow.document.write('<!DOCTYPE html><html><head><title>Exam Analysis Report</title>');
           printWindow.document.write('<style>body{font-family: sans-serif; padding: 20px;} table{width:100%; border-collapse:collapse; font-size: 10px;} th, td{border: 1px solid #000; padding: 4px; text-align: center;} th{background: #f0f0f0;} h2, h3{text-align:center;}</style>');
           printWindow.document.write('</head><body>');
@@ -512,6 +516,7 @@ const Admin = () => {
   };
   
   const handleSaveKeys = () => {
+    // ... same as before
     setConfirmState({
         isOpen: true,
         title: 'Save & Reload?',
@@ -534,6 +539,7 @@ const Admin = () => {
   };
 
   const handleParseDocument = async () => {
+    // ... same as before
     if (!qFile) {
       showToast("Please upload the Question Paper PDF/Image first.", 'error');
       return;
@@ -555,6 +561,7 @@ const Admin = () => {
   };
   
   const handleGenConfigCountsChange = (subject: keyof GenerationConfig, type: 'mcq' | 'numerical', value: string) => {
+    // ... same as before
     const numValue = parseInt(value, 10);
     if (isNaN(numValue) || numValue < 0 || numValue > 50) return;
     setGenerationConfig(prev => ({
@@ -596,12 +603,15 @@ const Admin = () => {
         qHtml += `<div class="question-block"><div class="q-header"><span class="q-num">Q${idx + 1}.</span><span class="q-meta">${q.subject} (${q.type})</span></div><div class="q-statement">${q.statement.replace(/\n/g, '<br/>')}</div>${q.type === 'MCQ' && q.options ? `<div class="q-options">${q.options.map((opt: string, i: number) => `<div class="q-option"><span class="opt-label">${String.fromCharCode(65 + i)})</span><span class="opt-text">${opt}</span></div>`).join('')}</div>` : ''}</div>`;
         sHtml += `<div class="solution-block"><div class="s-header"><strong>Q${idx + 1}.</strong> <span class="correct-ans">Correct Answer: ${q.correctAnswer}</span></div><div class="s-concept"><strong>Concept:</strong> ${q.concept}</div><div class="s-body"><strong>Explanation:</strong><br/>${q.solution ? q.solution.replace(/\n/g, '<br/>') : q.explanation.replace(/\n/g, '<br/>')}</div></div>`;
     });
-    const fullHtml = `<!DOCTYPE html><html><head><title>JEE Nexus Paper - ${uploadDate}</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script><style>body { font-family: 'Times New Roman', serif; padding: 40px; max-width: 900px; mx-auto; } h1, h2, h3 { text-align: center; } .section-break { page-break-before: always; border-top: 2px dashed #ccc; margin-top: 40px; padding-top: 40px; } .question-block, .solution-block { margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 20px; } .q-header, .s-header { margin-bottom: 8px; font-weight: bold; } .q-meta { font-size: 0.8em; color: #666; margin-left: 10px; text-transform: uppercase; } .q-statement { margin-bottom: 12px; font-size: 1.1em; line-height: 1.5; } .q-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; } .q-option { display: flex; gap: 8px; } .opt-label { font-weight: bold; } .correct-ans { color: #008000; margin-left: 10px; } .s-concept { font-style: italic; color: #444; margin-bottom: 5px; font-size: 0.9em; } .s-body { background: #f9f9f9; padding: 10px; border-radius: 5px; font-size: 0.95em; line-height: 1.4; } @media print { body { padding: 0; } .no-print { display: none; } }</style></head><body><h1>JEE Nexus AI - Daily Practice Paper</h1><h3>Date: ${uploadDate} | Total Questions: ${sortedQuestions.length}</h3><hr/><h2>Part A: Question Paper</h2><div id="questions">${qHtml}</div><div class="section-break"><h2>Part B: Answer Key & Solutions</h2><div id="solutions">${sHtml}</div></div><script>document.addEventListener("DOMContentLoaded", function() { renderMathInElement(document.body, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError : false, trust: true }); setTimeout(() => { window.print(); }, 1000); });</script></body></html>`;
+    const fullHtml = `<!DOCTYPE html><html><head><title>JEE Nexus Paper - ${uploadDate}</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script><style>body { font-family: 'Times New Roman', serif; padding: 40px; max-width: 900px; mx-auto; } h1, h2, h3 { text-align: center; } .section-break { page-break-before: always; border-top: 2px dashed #ccc; margin-top: 40px; padding-top: 40px; } .question-block, .solution-block { margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 20px; } .q-header, .s-header { margin-bottom: 8px; font-weight: bold; } .q-meta { font-size: 0.8em; color: #666; margin-left: 10px; text-transform: uppercase; } .q-statement { margin-bottom: 12px; font-size: 1.1em; line-height: 1.5; } .q-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; } .q-option { display: flex; gap: 8px; } .opt-label { font-weight: bold; } .correct-ans { color: #008000; margin-left: 10px; } .s-concept { font-style: italic; color: #444; margin-bottom: 5px; font-size: 0.9em; } .s-body { background: #f9f9f9; padding: 10px; border-radius: 5px; font-size: 0.95em; line-height: 1.4; } @media print { body { padding: 0; } .no-print { display: none; } }</style></head><body><h1>JEE Nexus AI - Daily Practice Paper</h1><h3>Date: ${uploadDate} | Total Questions: ${sortedQuestions.length}</h3><hr/><h2>Part A: Question Paper</h2><div id="questions">${qHtml}</div><div class="section-break"><h2>Part B: Answer Key & Solutions</h2><div id="solutions">${sHtml}</div></div><script>document.addEventListener("DOMContentLoaded", function() { renderMathInElement(document.body, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError : false, trust: true, strict: false }); setTimeout(() => { window.print(); }, 1000); });</script></body></html>`;
+    
+    printWindow.document.open();
     printWindow.document.write(fullHtml);
     printWindow.document.close();
   };
 
   const handleAIGenerateDaily = async () => {
+      // ... same as before
       const totalQuestions = (Object.values(generationConfig) as SubjectConfig[]).reduce((acc, curr) => acc + curr.mcq + curr.numerical, 0);
       if (totalQuestions === 0) {
         showToast("Please configure at least one question to generate.", 'error');
@@ -635,6 +645,7 @@ const Admin = () => {
   };
 
   const handlePublishDaily = async () => {
+    // ... same as before
     if (parsedQuestions.length === 0) {
         showToast("Empty paper. Generate or parse some questions first.", 'error');
         return;
@@ -680,6 +691,7 @@ const Admin = () => {
   };
 
   const handleStatusChange = async (userId: string, status: 'approved' | 'rejected' | 'pending') => {
+    // ... same as before
     setActionLoading(userId);
     
     if (isLocalAdminMode) {
@@ -704,6 +716,7 @@ const Admin = () => {
   };
 
   const handleDeleteUser = async (userId: string) => {
+    // ... same as before
     setConfirmState({
         isOpen: true,
         title: 'Delete User?',
@@ -732,6 +745,7 @@ const Admin = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12 relative">
+      {/* ... (Existing render logic remains exactly the same, using the updated handlers above) ... */}
       <ConfirmDialog 
         isOpen={confirmState.isOpen} 
         title={confirmState.title} 
@@ -845,6 +859,7 @@ const Admin = () => {
         </div>
       )}
 
+      {/* ... (Rest of activeTab logic: Daily Paper Upload, Daily Challenges, Result Analysis, User Management - remains as is) ... */}
       {activeTab === 'Daily Paper Upload' && (
         <div className="space-y-8">
            {activeConfigSubject && (
@@ -1189,6 +1204,7 @@ const Admin = () => {
       )}
 
       {activeTab === 'User Management' && (
+        // ... (User management code remains as is) ...
         <div className="space-y-6">
           <div className={`bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in`}>
               <div className="p-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-slate-50/50">
