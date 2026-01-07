@@ -226,8 +226,7 @@ const Analytics = () => {
     </div>
   );
 
-  // ... rest of the file content ...
-  
+  // Stats Data Construction
   const subjectData = [
     { name: 'Physics', score: result.questions?.filter((q: any) => q.subject === 'Physics' && q.isCorrect).length * 4 || 0 },
     { name: 'Chemistry', score: result.questions?.filter((q: any) => q.subject === 'Chemistry' && q.isCorrect).length * 4 || 0 },
@@ -436,6 +435,48 @@ const Analytics = () => {
               </div>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 space-y-6">
+            <h2 className="text-2xl font-black text-slate-900 mb-6 flex items-center gap-3">
+                <BookOpen className="w-6 h-6 text-slate-400" />
+                Detailed Solutions
+            </h2>
+            {result.questions.map((q: any, idx: number) => (
+                <div key={idx} className={`p-8 rounded-[2rem] border-2 bg-white ${q.isCorrect ? 'border-emerald-100 shadow-sm' : 'border-red-100 shadow-sm'}`}>
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-3">
+                            <span className={`flex items-center justify-center w-8 h-8 rounded-full font-black text-xs ${q.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                {idx + 1}
+                            </span>
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">{q.subject}</span>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${q.isCorrect ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                            {q.isCorrect ? 'Correct' : 'Incorrect'}
+                        </span>
+                    </div>
+                    
+                    <div className="mb-6">
+                        <MathText text={q.statement} className="text-slate-800 font-medium text-lg leading-relaxed" />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div className={`p-4 rounded-xl border ${q.isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                            <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">Your Answer</p>
+                            <MathText text={q.userAnswer ? q.userAnswer.toString() : 'Skipped'} className="font-bold text-lg" />
+                        </div>
+                        <div className="p-4 rounded-xl border bg-blue-50 border-blue-200">
+                            <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1 text-blue-800">Correct Answer</p>
+                            <MathText text={q.correctAnswer.toString()} className="font-bold text-lg text-blue-900" />
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Explanation</p>
+                        <MathText text={q.solution || q.explanation} className="text-slate-600 text-sm leading-relaxed" />
+                    </div>
+                </div>
+            ))}
         </div>
       )}
     </div>
