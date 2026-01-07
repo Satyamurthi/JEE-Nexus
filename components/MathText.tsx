@@ -25,20 +25,12 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
       // 1. Normalize line breaks
       let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // 2. Fix common AI latex escape issues, but be careful not to break matrices (\\)
-      // We only fix specific command patterns that might be double escaped by accident
+      // 2. Fix common AI latex escape issues
       // e.g. \\( -> \(
       sanitizedText = sanitizedText.replace(/\\\\\[/g, '\\[').replace(/\\\\\]/g, '\\]');
       sanitizedText = sanitizedText.replace(/\\\\\(/g, '\\(').replace(/\\\\\)/g, '\\)');
-      // Do NOT globally replace \\ with \ as it breaks newline logic in tables/matrices
-
+      
       // 3. Regex to split content by math delimiters
-      // Captures:
-      // $$...$$ (Display)
-      // \[...\] (Display)
-      // \begin{env}...\end{env} (Display/Block) - Matches any environment
-      // $...$ (Inline)
-      // \(...\) (Inline)
       const regex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\begin\{[a-zA-Z0-9*]+\}[\s\S]*?\\end\{[a-zA-Z0-9*]+\})|(?:\$[\s\S]*?\$)|(?:\\\([\s\S]*?\\\)))/g;
       
       const parts = sanitizedText.split(regex);
@@ -58,19 +50,18 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
 
         if (isDisplayMath || isInlineMath) {
             let content = part;
-            // Strip standard delimiters for processing (KaTeX doesn't need them if we specify displayMode)
-            // However, we MUST keep \begin...\end wrapping for environments.
             
             if (part.startsWith('$$')) content = part.slice(2, -2);
             else if (part.startsWith('\\[')) content = part.slice(2, -2);
             else if (part.startsWith('$')) content = part.slice(1, -1);
             else if (part.startsWith('\\(')) content = part.slice(2, -2);
             
-            // Common options
+            // Critical: Ensure throwOnError is false and trust is true to prevent errors in quirks mode or with unknown macros
             const renderOptions = {
                  throwOnError: false, 
                  trust: true, 
                  strict: false,
+                 output: 'html', // Ensure HTML output for maximum compatibility
                  displayMode: isDisplayMath || isBlock,
                  globalGroup: true,
                  macros: {
@@ -86,7 +77,6 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
                 return katex.renderToString(content, renderOptions);
             } catch (katexErr) {
                 console.warn("KaTeX render error:", katexErr);
-                // Fallback: simple text display of the code
                 return `<span class="text-red-500 font-mono text-xs break-all" title="Render Error">${part}</span>`;
             }
         }

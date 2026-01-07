@@ -110,8 +110,7 @@ const Analytics = () => {
         `;
     });
 
-    const fullHtml = `
-        <!DOCTYPE html>
+    const fullHtml = `<!DOCTYPE html>
         <html>
         <head>
             <title>Exam Report - ${userName}</title>
