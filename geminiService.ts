@@ -23,6 +23,23 @@ const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview";
 const VISION_MODEL = config.visionModel || "gemini-3-flash-preview"; 
 const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
 
+// Robust Key Retrieval for Vite & Standard Envs
+const getApiKey = () => {
+  // 1. Try process.env (Node/Webpack/Parcel)
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+  // 2. Try import.meta.env (Vite standard)
+  try {
+    // @ts-ignore
+    if (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {}
+  return '';
+};
+
 // Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -81,6 +98,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Calls the Netlify Proxy Function (Google Only)
+ * Used when Client API Key is not available
  */
 const callAIProxy = async (params: any) => {
     try {
@@ -89,6 +107,7 @@ const callAIProxy = async (params: any) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
+        
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
             const data = await response.json();
@@ -200,12 +219,21 @@ const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
     
     try {
         if (currentProvider === 'google') {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            return await ai.models.generateContent({
-                model: params.model, 
-                contents: params.contents,
-                config: params.config
-            });
+            const apiKey = getApiKey();
+            
+            // If API Key exists locally (Env or Vite Env), use Direct SDK
+            if (apiKey) {
+                const ai = new GoogleGenAI({ apiKey });
+                return await ai.models.generateContent({
+                    model: params.model, 
+                    contents: params.contents,
+                    config: params.config
+                });
+            } else {
+                // Fallback to Proxy if key is hidden on server
+                console.log("No local API key found, attempting to use AI Proxy...");
+                return await callAIProxy(params);
+            }
         } else {
             const providerParams = { ...currentConfig, provider: currentProvider };
             return await callOpenAICompatible(params, providerParams);
