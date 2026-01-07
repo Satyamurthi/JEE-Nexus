@@ -415,7 +415,7 @@ const Admin = () => {
         const customModels = JSON.parse(localStorage.getItem('nexus_model_config') || '{}');
         setGenModel(customModels.genModel || 'gemini-3-flash-preview');
         setAnalysisModel(customModels.analysisModel || 'gemini-3-flash-preview');
-        setVisionModel(customModels.visionModel || 'gemini-2.0-flash-exp');
+        setVisionModel(customModels.visionModel || 'gemini-3-flash-preview');
     }
   }, [activeTab, analysisDate]);
 
@@ -526,7 +526,7 @@ const Admin = () => {
             localStorage.setItem('nexus_model_config', JSON.stringify({
                 genModel: genModel || 'gemini-3-flash-preview',
                 analysisModel: analysisModel || 'gemini-3-flash-preview',
-                visionModel: visionModel || 'gemini-2.0-flash-exp'
+                visionModel: visionModel || 'gemini-3-flash-preview'
             }));
             window.location.reload();
         }
@@ -832,7 +832,7 @@ const Admin = () => {
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-600 mb-1 block">Document Parsing Model (Vision)</label>
-                            <input type="text" value={visionModel} onChange={(e) => setVisionModel(e.target.value)} placeholder="gemini-2.0-flash-exp" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm" />
+                            <input type="text" value={visionModel} onChange={(e) => setVisionModel(e.target.value)} placeholder="gemini-3-flash-preview" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm" />
                              <p className="text-[10px] text-slate-400 mt-1 font-medium">Used for extracting questions from PDFs/Images. Must support vision.</p>
                         </div>
                     </div>
