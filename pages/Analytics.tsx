@@ -12,12 +12,47 @@ const Analytics = () => {
   const [loadingAi, setLoadingAi] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
+  const [priorityTraining, setPriorityTraining] = useState<any[]>([]);
 
   useEffect(() => {
     const raw = localStorage.getItem('last_result');
     if (raw) {
       const parsed = JSON.parse(raw);
       setResult(parsed);
+      
+      // Calculate dynamic priority training data from this specific result
+      if (parsed.questions) {
+          const chapterStats: Record<string, { total: number, correct: number }> = {};
+          parsed.questions.forEach((q: any) => {
+              // Try chapter first, then concept, then subject
+              const key = q.chapter || q.concept || q.subject || 'General';
+              if (!chapterStats[key]) chapterStats[key] = { total: 0, correct: 0 };
+              chapterStats[key].total++;
+              if (q.isCorrect) chapterStats[key].correct++;
+          });
+
+          const trainingData = Object.entries(chapterStats).map(([chapter, stats]) => {
+              const acc = (stats.correct / stats.total) * 100;
+              let status = 'Expert';
+              let color = 'text-green-600';
+              let bg = 'bg-green-50';
+              
+              if (acc < 50) {
+                  status = 'Critical';
+                  color = 'text-red-600';
+                  bg = 'bg-red-50';
+              } else if (acc < 80) {
+                  status = 'Insecure';
+                  color = 'text-orange-600';
+                  bg = 'bg-orange-50';
+              }
+              
+              return { chapter, status, score: Math.round(acc), color, bg };
+          }).sort((a, b) => a.score - b.score).slice(0, 3); // Top 3 weakest areas
+          
+          setPriorityTraining(trainingData);
+      }
+
       fetchAIAnalysis(parsed);
     }
   }, []);
@@ -398,23 +433,26 @@ const Analytics = () => {
             <div className="space-y-10">
               <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-premium">
                  <h3 className="text-xl font-black text-slate-900 mb-8 tracking-tight">Priority Training</h3>
-                 <div className="space-y-8">
-                   {[
-                     { chapter: 'Thermodynamics', status: 'Expert', score: 92, color: 'text-green-600', bg: 'bg-green-50' },
-                     { chapter: 'Rotational Motion', status: 'Insecure', score: 45, color: 'text-orange-600', bg: 'bg-orange-50' },
-                     { chapter: 'Calculus', status: 'Critical', score: 28, color: 'text-red-600', bg: 'bg-red-50' }
-                   ].map((item, i) => (
-                     <div key={i} className="group cursor-pointer">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors">{item.chapter}</span>
-                          <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${item.bg} ${item.color}`}>{item.status}</span>
+                 {priorityTraining.length > 0 ? (
+                    <div className="space-y-8">
+                    {priorityTraining.map((item, i) => (
+                        <div key={i} className="group cursor-pointer">
+                            <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors capitalize">{item.chapter}</span>
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${item.bg} ${item.color}`}>{item.status}</span>
+                            </div>
+                            <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden p-0.5 border border-slate-100">
+                            <div className={`h-full ${item.color.replace('text', 'bg')} rounded-full opacity-80 shadow-sm`} style={{ width: `${item.score}%` }} />
+                            </div>
                         </div>
-                        <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden p-0.5 border border-slate-100">
-                           <div className={`h-full ${item.color.replace('text', 'bg')} rounded-full opacity-80 shadow-sm`} style={{ width: `${item.score}%` }} />
-                        </div>
-                     </div>
-                   ))}
-                 </div>
+                    ))}
+                    </div>
+                 ) : (
+                    <div className="text-center text-slate-400 py-10">
+                        <p className="font-bold text-sm">Needs More Data</p>
+                        <p className="text-xs mt-1">Complete the exam to identify weak chapters.</p>
+                    </div>
+                 )}
                  <button className="w-full mt-10 py-5 bg-slate-50 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center justify-center gap-3">
                    View Subject Map
                    <ChevronRight className="w-4 h-4" />
@@ -427,7 +465,7 @@ const Analytics = () => {
                    <Target className="w-8 h-8" />
                  </div>
                  <h3 className="text-2xl font-black tracking-tight mb-4">Improve Strategy</h3>
-                 <p className="text-fuchsia-100/80 text-sm font-medium leading-relaxed mb-10">AI has identified 15 practice items from your weak areas. Resolve these to boost predicted score by ~12%.</p>
+                 <p className="text-fuchsia-100/80 text-sm font-medium leading-relaxed mb-10">AI has identified specific weak points. Resolve these to boost predicted score by ~12%.</p>
                  <button className="w-full py-5 bg-white text-purple-900 rounded-2xl font-black text-sm shadow-xl shadow-purple-900/20 hover:scale-[1.02] active:scale-95 transition-all">Start Revision Drill</button>
               </div>
             </div>

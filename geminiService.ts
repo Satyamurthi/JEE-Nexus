@@ -12,41 +12,16 @@ const getModelConfig = () => {
 };
 
 const config = getModelConfig();
-
-// Helper to sanitize models (prevent sticking to deprecated/limited models like 2.0-flash-exp)
-const validateModel = (model: string | undefined, defaultModel: string) => {
-    if (!model) return defaultModel;
-    // Forcefully fallback if deprecated/experimental model causing 429s is found
-    if (model.includes("2.0-flash-exp")) return defaultModel; 
-    return model;
-};
-
 // Legacy fallback or new fields
 const PROVIDER = config.provider || 'google'; 
 // API Key is handled via process.env.API_KEY for Google, but keeping legacy fallback for other providers
 const BASE_URL = config.baseUrl || '';
+// User requested gemini-3.0-preview everywhere. Mapping to available preview tag.
+const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview"; 
 
-// Constants for Google (with Sanitization)
-const MODEL_ID = validateModel(config.modelId || config.genModel, "gemini-3-flash-preview");
-const VISION_MODEL = validateModel(config.visionModel, "gemini-3-flash-preview"); 
-const ANALYSIS_MODEL = validateModel(config.analysisModel, "gemini-3-flash-preview");
-
-// Robust Key Retrieval for Vite & Standard Envs
-const getApiKey = () => {
-  // 1. Try process.env (Node/Webpack/Parcel)
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-    return process.env.API_KEY;
-  }
-  // 2. Try import.meta.env (Vite standard)
-  try {
-    // @ts-ignore
-    if (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) {
-      // @ts-ignore
-      return import.meta.env.VITE_API_KEY;
-    }
-  } catch (e) {}
-  return '';
-};
+// Constants for Google
+const VISION_MODEL = config.visionModel || "gemini-3-flash-preview"; 
+const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
 
 // Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -72,16 +47,10 @@ const cleanAndParseJSON = (text: string) => {
     console.warn("Initial JSON Parse failed, attempting sanitization...");
     try {
         // Robust Sanitization for LaTeX Backslashes
-        // 1. Identify backslashes that are NOT followed by valid JSON escape characters (" \ / b f n r t u)
-        // 2. Double escape them (e.g., \alpha -> \\alpha)
-        // The regex matches a sequence of backslashes (\+) followed by an invalid escape char
         const fixedText = cleanText.replace(/(\\+)([^"\\/bfnrtu])/g, (match, backslashes, char) => {
-            // If we have an odd number of backslashes (1, 3, etc.), the last one is trying to escape 'char'
-            // Since 'char' is not a valid JSON escape, we must escape the backslash itself.
             if (backslashes.length % 2 === 1) {
                 return backslashes + "\\" + char;
             }
-            // If even (2, 4), the backslashes are already paired, so we leave it alone.
             return match;
         });
         
@@ -92,7 +61,6 @@ const cleanAndParseJSON = (text: string) => {
         const arrayMatch = cleanText.match(/\[.*\]/s);
         if (arrayMatch) {
             try {
-                 // Try recursive sanitization on just the array part
                  const fixedArray = arrayMatch[0].replace(/(\\+)([^"\\/bfnrtu])/g, (m, b, c) => b.length % 2 === 1 ? b + "\\" + c : m);
                  return JSON.parse(fixedArray);
             } catch (e3) {}
@@ -106,7 +74,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Calls the Netlify Proxy Function (Google Only)
- * Used when Client API Key is not available
  */
 const callAIProxy = async (params: any) => {
     try {
@@ -115,11 +82,10 @@ const callAIProxy = async (params: any) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-        
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
             const data = await response.json();
-            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText, details: data.error };
+            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText };
             return data;
         } else {
             const text = await response.text();
@@ -218,66 +184,46 @@ const callOpenAICompatible = async (params: any, providerConfig: any) => {
 };
 
 /**
- * Main Wrapper
+ * Main Wrapper with Exponential Backoff for Rate Limits
  */
-const safeGenerateContent = async (params: any, retries = 3): Promise<any> => {
+const safeGenerateContent = async (params: any, retries = 3, initialDelay = 4000): Promise<any> => {
     // Reload config on every call to ensure latest settings
     const currentConfig = getModelConfig();
     const currentProvider = currentConfig.provider || 'google';
     
     try {
         if (currentProvider === 'google') {
-            const apiKey = getApiKey();
-            
-            // If API Key exists locally (Env or Vite Env), use Direct SDK
-            if (apiKey) {
-                const ai = new GoogleGenAI({ apiKey });
-                return await ai.models.generateContent({
-                    model: params.model, 
-                    contents: params.contents,
-                    config: params.config
-                });
-            } else {
-                // Fallback to Proxy if key is hidden on server
-                console.log("No local API key found, attempting to use AI Proxy...");
-                return await callAIProxy(params);
-            }
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            return await ai.models.generateContent({
+                model: params.model, 
+                contents: params.contents,
+                config: params.config
+            });
         } else {
             const providerParams = { ...currentConfig, provider: currentProvider };
             return await callOpenAICompatible(params, providerParams);
         }
     } catch (e: any) {
-        // Smart Error Handling for 429 (Resource Exhausted)
-        // Extract retry delay from message if available "Please retry in 51.59s"
-        const isQuotaError = e.status === 429 || e.code === 429 || (e.error && e.error.code === 429) || (e.message && e.message.includes('429'));
+        console.warn(`AI Generation Error (Retries left: ${retries}):`, e.message || e);
         
-        if (isQuotaError) {
-            console.warn("Quota exceeded (429). Initiating backoff...");
-            let waitTime = 10000; // Default 10s base wait
-            
-            if (e.message) {
-                const match = e.message.match(/retry in (\d+(\.\d+)?)s/);
-                if (match) {
-                    waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 1500; // Exact wait + 1.5s buffer
-                }
-            }
-            
-            // Cap wait time to 60s to prevent infinite hangs, unless retrying
-            waitTime = Math.min(waitTime, 60000);
-            
-            if (retries > 0) {
-                console.log(`Waiting ${Math.round(waitTime/1000)}s before retry...`);
-                await delay(waitTime);
-                return safeGenerateContent(params, retries - 1);
-            }
-        } else {
-            console.warn("AI Generation Error:", e);
-            if (retries > 0) {
-                // Standard backoff for other errors (500s, timeouts)
-                await delay(4000); 
-                return safeGenerateContent(params, retries - 1);
-            }
+        // Check for 429 Rate Limit or 503 Service Unavailable
+        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.message?.includes('quota');
+        const isServerOverload = e.message?.includes('503') || e.status === 503;
+
+        if (retries > 0 && (isRateLimit || isServerOverload)) {
+            // Exponential backoff: 4s -> 8s -> 16s
+            const waitTime = initialDelay * (2 ** (3 - retries)); 
+            console.log(`Rate limit hit. Waiting ${waitTime}ms before retry...`);
+            await delay(waitTime);
+            return safeGenerateContent(params, retries - 1, initialDelay);
         }
+        
+        // General retry for other errors (like network blips) with standard delay
+        if (retries > 0 && !isRateLimit) {
+             await delay(2000);
+             return safeGenerateContent(params, retries - 1, initialDelay);
+        }
+
         throw e;
     }
 };
@@ -435,14 +381,15 @@ interface FullGenerationConfig { physics: SubjectConfig; chemistry: SubjectConfi
 export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
     // Sequential Execution to prevent Rate Limiting on Preview Models
+    // Increased delay to 10s to ensure we don't hit the 15/20 RPM limit easily with 3 heavy calls
     
     // 1. Physics
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, config.physics.topics, { mcq: config.physics.mcq, numerical: config.physics.numerical });
-    await delay(4000); // 4s Backoff to match RPM limits
+    await delay(10000); // 10s Backoff to match RPM limits
 
     // 2. Chemistry
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, config.chemistry.topics, { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical });
-    await delay(4000); 
+    await delay(10000); 
 
     // 3. Mathematics
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, config.mathematics.topics, { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical });
@@ -464,24 +411,13 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 
   const currentProvider = config.provider || 'google';
   
-  if (currentProvider === 'google') {
-      const qBase64 = qBase64DataUrl.split(',')[1];
-      parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
-      
-      if (solutionFile) {
-        const sBase64DataUrl = await fileToBase64(solutionFile);
-        const sBase64 = sBase64DataUrl.split(',')[1];
-        parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
-      }
-  } else {
-      const qBase64 = qBase64DataUrl.split(',')[1];
-      parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
-      
-      if (solutionFile) {
-        const sBase64DataUrl = await fileToBase64(solutionFile);
-        const sBase64 = sBase64DataUrl.split(',')[1];
-        parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
-      }
+  const qBase64 = qBase64DataUrl.split(',')[1];
+  parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
+  
+  if (solutionFile) {
+    const sBase64DataUrl = await fileToBase64(solutionFile);
+    const sBase64 = sBase64DataUrl.split(',')[1];
+    parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
   }
 
   const prompt = `Extract every question from these documents into a structured JSON array. 

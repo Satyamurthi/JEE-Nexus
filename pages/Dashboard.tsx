@@ -37,11 +37,49 @@ const Dashboard = () => {
     avgScore: 0,
     accuracy: 0,
     percentile: 0,
-    testsTaken: 0
+    testsTaken: 0,
+    streak: 0
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [weakAreas, setWeakAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Helper to calculate streak
+  const calculateStreak = (history: any[]) => {
+    if (!history || history.length === 0) return 0;
+    
+    // Extract unique dates (YYYY-MM-DD)
+    const dates = Array.from(new Set(history.map((h: any) => {
+        return new Date(h.completedAt).toISOString().split('T')[0];
+    }))).sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime());
+
+    if (dates.length === 0) return 0;
+
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    // If latest exam wasn't today or yesterday, streak is broken (0)
+    // However, if they have past history but missed yesterday, it's 0. 
+    // If they did one today, it starts at 1.
+    if (dates[0] !== today && dates[0] !== yesterday) return 0;
+
+    let streak = 1;
+    let currentDate = new Date(dates[0]);
+
+    for (let i = 1; i < dates.length; i++) {
+        const prevDate = new Date(dates[i]);
+        const diffTime = Math.abs(currentDate.getTime() - prevDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+        if (diffDays === 1) {
+        streak++;
+        currentDate = prevDate;
+        } else {
+        break;
+        }
+    }
+    return streak;
+  };
 
   useEffect(() => {
     // 1. Load Profile
@@ -52,9 +90,11 @@ const Dashboard = () => {
     const historyRaw = localStorage.getItem('exam_history');
     const history = historyRaw ? JSON.parse(historyRaw) : [];
 
+    // Calculate Streak
+    const currentStreak = calculateStreak(history);
+
     if (history.length > 0) {
       const totalScore = history.reduce((acc: number, curr: any) => acc + (curr.score || 0), 0);
-      const totalPossible = history.reduce((acc: number, curr: any) => acc + (curr.totalPossible || 0), 0);
       const avgAcc = history.reduce((acc: number, curr: any) => acc + (curr.accuracy || 0), 0) / history.length;
       
       // Mock Percentile Algorithm (Logarithmic scale based on accuracy)
@@ -64,25 +104,46 @@ const Dashboard = () => {
         avgScore: Math.round(totalScore / history.length),
         accuracy: Math.round(avgAcc),
         percentile: parseFloat(estPercentile),
-        testsTaken: history.length
+        testsTaken: history.length,
+        streak: currentStreak
       });
 
-      // 3. Compute Weak Areas (Mock logic: finding chapters with low scores in metadata if available, else random from NCERT)
-      // In a real app, we'd aggregate per-question metadata. Here we simulate using question types or subjects.
-      // Let's use subjects/types that had wrong answers.
-      const weaknesses = new Set<string>();
-      history.slice(0, 5).forEach((h: any) => {
-          if (h.accuracy < 60) weaknesses.add(`${h.type || 'General'} Concepts`);
+      // 3. Compute Weak Areas dynamically from ALL questions in history
+      const conceptMap: Record<string, { total: number, correct: number }> = {};
+    
+      history.forEach((h: any) => {
+          if (h.questions) {
+              h.questions.forEach((q: any) => {
+                  // Use chapter or concept as key. Fallback to Subject if missing.
+                  const key = q.chapter || q.concept || q.subject || "General Concepts";
+                  if (!conceptMap[key]) conceptMap[key] = { total: 0, correct: 0 };
+                  conceptMap[key].total++;
+                  if (q.isCorrect) conceptMap[key].correct++;
+              });
+          }
       });
-      if (weaknesses.size === 0) weaknesses.add("Advanced Mechanics"); 
-      if (weaknesses.size < 3) weaknesses.add("Organic Reaction Mechanisms");
       
-      setWeakAreas(Array.from(weaknesses).slice(0, 3));
+      // Convert to array and sort by accuracy (ascending -> weakest first)
+      const performance = Object.entries(conceptMap)
+        .map(([name, stats]) => ({
+            name,
+            accuracy: (stats.correct / stats.total) * 100,
+            count: stats.total
+        }))
+        .filter(p => p.count >= 1) // Only consider topics with attempts
+        .sort((a, b) => a.accuracy - b.accuracy); 
+      
+      if (performance.length > 0) {
+          setWeakAreas(performance.slice(0, 3).map(p => p.name));
+      } else {
+          setWeakAreas(['Kinematics', 'Chemical Bonding', 'Calculus Basics']); // Fallbacks
+      }
       
       // 4. Set Recent Activity
       setRecentActivity(history.slice(0, 4)); // Top 4
     } else {
         // Defaults for new user
+        setStats({ avgScore: 0, accuracy: 0, percentile: 0, testsTaken: 0, streak: 0 });
         setWeakAreas(['Kinematics', 'Chemical Bonding', 'Calculus Basics']);
     }
 
@@ -121,8 +182,8 @@ const Dashboard = () => {
         <div className="hidden md:block pb-2">
             <p className="text-slate-400 font-bold text-right text-lg">Current Streak</p>
             <div className="flex items-center gap-2 justify-end">
-                <Flame className="w-8 h-8 text-orange-500 fill-orange-500 animate-bounce" />
-                <span className="text-4xl font-black text-slate-900">12</span>
+                <Flame className={`w-8 h-8 ${stats.streak > 0 ? 'text-orange-500 fill-orange-500 animate-bounce' : 'text-slate-300'}`} />
+                <span className="text-4xl font-black text-slate-900">{stats.streak}</span>
                 <span className="text-xl font-bold text-slate-300">Days</span>
             </div>
         </div>
@@ -134,7 +195,7 @@ const Dashboard = () => {
             icon={<Target />} 
             label="Avg. Accuracy" 
             value={`${stats.accuracy}%`} 
-            subValue={stats.testsTaken > 0 ? "Based on actual performance" : "Pending calibration"}
+            subValue={stats.testsTaken > 0 ? `${stats.testsTaken} Sessions Analyzed` : "Pending calibration"}
             gradient="bg-gradient-to-br from-violet-600 to-indigo-700"
             delay={0.1}
         />
@@ -241,7 +302,7 @@ const Dashboard = () => {
              </h3>
              
              <div className="space-y-4 relative z-10">
-               {weakAreas.map((area, i) => (
+               {weakAreas.length > 0 ? weakAreas.map((area, i) => (
                  <div key={i} className="flex items-center justify-between p-5 bg-slate-50 rounded-[1.5rem] border border-slate-100 hover:bg-white hover:shadow-lg hover:shadow-fuchsia-100/50 hover:border-fuchsia-100 transition-all cursor-pointer group">
                     <div className="flex items-center gap-4">
                         <span className="text-xs font-black text-slate-300">0{i+1}</span>
@@ -249,10 +310,12 @@ const Dashboard = () => {
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-fuchsia-500" />
                  </div>
-               ))}
+               )) : (
+                 <div className="text-center p-4 text-slate-400 text-sm font-medium">No performance data yet.</div>
+               )}
              </div>
              
-             <button className="w-full mt-8 py-4 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all">
+             <button onClick={() => navigate('/practice')} className="w-full mt-8 py-4 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all">
                 Generate Remedial Plan
              </button>
         </div>
@@ -279,12 +342,12 @@ const Dashboard = () => {
                   </div>
               ) : (
                   recentActivity.map((item, idx) => (
-                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 bg-white rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-blue-100/50">
+                    <div key={idx} onClick={() => { localStorage.setItem('last_result', JSON.stringify(item)); navigate('/analytics'); }} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 bg-white rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-blue-100/50">
                       <div className="flex items-center gap-5 mb-4 sm:mb-0">
                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold shadow-md ${
                             item.score > (item.totalPossible * 0.7) ? 'bg-emerald-500 shadow-emerald-200' : 'bg-indigo-500 shadow-indigo-200'
                          }`}>
-                            {item.score > 0 ? Math.round((item.score/item.totalPossible)*10) : '-'}
+                            {item.totalPossible > 0 ? Math.round((item.score/item.totalPossible)*10) : '-'}
                          </div>
                          <div>
                             <p className="font-bold text-slate-900 text-lg group-hover:text-blue-700 transition-colors">{item.type || 'Standard Drill'}</p>
