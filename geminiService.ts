@@ -14,7 +14,6 @@ const getModelConfig = () => {
 const config = getModelConfig();
 // Legacy fallback or new fields
 const PROVIDER = config.provider || 'google'; 
-// API Key is handled via process.env.API_KEY for Google, but keeping legacy fallback for other providers
 const BASE_URL = config.baseUrl || '';
 // User requested gemini-3.0-preview everywhere. Mapping to available preview tag.
 const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview"; 
@@ -73,28 +72,43 @@ const cleanAndParseJSON = (text: string) => {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Calls the Netlify Proxy Function (Google Only)
+ * MULTI-KEY ROTATION SYSTEM
+ * Handles 429/Quota limits by cycling through a pool of available keys.
  */
-const callAIProxy = async (params: any) => {
-    try {
-        const response = await fetch('/.netlify/functions/ai-proxy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(params)
-        });
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-            const data = await response.json();
-            if (!response.ok) throw { status: response.status, message: data.error?.message || response.statusText };
-            return data;
-        } else {
-            const text = await response.text();
-            throw { status: response.status, message: `Proxy connection failed: ${text.substring(0, 100)}` };
-        }
-    } catch (error: any) {
-        console.error("Proxy Call Failed:", error);
-        throw error;
-    }
+const API_KEY_POOL = [
+  "AIzaSyDmInFBTJ3dA_BmPopd9hALyqh78Dnycqc",
+  "AIzaSyCIpRbTI0HNCU-xD0TBK9oVYau2HymmFjo",
+  "AIzaSyAO_SBZPrmNYM9nyXNdzsjp8gdoKm3Oheo"
+];
+
+const getAvailableApiKeys = (): string[] => {
+  // Start with the hardcoded backup keys
+  const keys = [...API_KEY_POOL];
+  
+  const parseEnvList = (envVal: string | undefined) => {
+    if (!envVal) return [];
+    return envVal.split(',').map(k => k.trim()).filter(k => k);
+  };
+
+  // Check process.env (Standard/CRA)
+  if (typeof process !== 'undefined' && process.env) {
+    if (process.env.GEMINI_API_KEYS) keys.unshift(...parseEnvList(process.env.GEMINI_API_KEYS));
+    if (process.env.REACT_APP_GEMINI_API_KEYS) keys.unshift(...parseEnvList(process.env.REACT_APP_GEMINI_API_KEYS));
+    if (process.env.API_KEY) keys.unshift(process.env.API_KEY);
+    if (process.env.REACT_APP_API_KEY) keys.unshift(process.env.REACT_APP_API_KEY);
+    if (process.env.VITE_API_KEY) keys.unshift(process.env.VITE_API_KEY);
+  }
+  
+  // Check import.meta.env (Vite)
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    const env = (import.meta as any).env;
+    if (env.VITE_GEMINI_API_KEYS) keys.unshift(...parseEnvList(env.VITE_GEMINI_API_KEYS));
+    if (env.VITE_API_KEY) keys.unshift(env.VITE_API_KEY);
+    if (env.API_KEY) keys.unshift(env.API_KEY);
+  }
+
+  // Deduplicate and filter empty
+  return Array.from(new Set(keys)).filter(k => !!k && k.trim() !== '');
 };
 
 /**
@@ -184,16 +198,25 @@ const callOpenAICompatible = async (params: any, providerConfig: any) => {
 };
 
 /**
- * Main Wrapper with Exponential Backoff for Rate Limits
+ * Main Wrapper with Multi-Key Rotation
+ * Automatically switches keys on 429/403 errors.
  */
-const safeGenerateContent = async (params: any, retries = 3, initialDelay = 4000): Promise<any> => {
-    // Reload config on every call to ensure latest settings
+const safeGenerateContent = async (params: any, retries = 3, initialDelay = 3000, keyOffset = 0): Promise<any> => {
+    // Reload config on every call
     const currentConfig = getModelConfig();
     const currentProvider = currentConfig.provider || 'google';
     
     try {
         if (currentProvider === 'google') {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const keys = getAvailableApiKeys();
+            if (keys.length === 0) throw new Error("No API Keys found in pool or environment.");
+            
+            // Round-robin selection based on retries/offset
+            const activeKey = keys[keyOffset % keys.length];
+            
+            // Debug only: console.log(`[Gemini] Using Key Index: ${keyOffset % keys.length} / ${keys.length}`); 
+            
+            const ai = new GoogleGenAI({ apiKey: activeKey });
             return await ai.models.generateContent({
                 model: params.model, 
                 contents: params.contents,
@@ -204,24 +227,29 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 4000
             return await callOpenAICompatible(params, providerParams);
         }
     } catch (e: any) {
-        console.warn(`AI Generation Error (Retries left: ${retries}):`, e.message || e);
+        console.warn(`AI Generation Error (Retries: ${retries}, KeyOffset: ${keyOffset}):`, e.message || e);
         
-        // Check for 429 Rate Limit or 503 Service Unavailable
-        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.message?.includes('quota');
+        // Check for 429 Rate Limit or 403 Quota Exceeded or 503 Overload
+        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.message?.includes('quota') || e.status === 403;
         const isServerOverload = e.message?.includes('503') || e.status === 503;
 
-        if (retries > 0 && (isRateLimit || isServerOverload)) {
-            // Exponential backoff: 4s -> 8s -> 16s
-            const waitTime = initialDelay * (2 ** (3 - retries)); 
-            console.log(`Rate limit hit. Waiting ${waitTime}ms before retry...`);
-            await delay(waitTime);
-            return safeGenerateContent(params, retries - 1, initialDelay);
-        }
-        
-        // General retry for other errors (like network blips) with standard delay
-        if (retries > 0 && !isRateLimit) {
-             await delay(2000);
-             return safeGenerateContent(params, retries - 1, initialDelay);
+        if (retries > 0) {
+            if (isRateLimit) {
+                // IMMEDIATE ROTATION: Try next key without waiting
+                console.log("Quota limit hit. Rotating to next API Key immediately...");
+                return safeGenerateContent(params, retries - 1, 500, keyOffset + 1);
+            }
+            
+            if (isServerOverload) {
+                // Exponential backoff for server issues
+                const waitTime = initialDelay * (2 ** (3 - retries));
+                await delay(waitTime);
+                return safeGenerateContent(params, retries - 1, initialDelay, keyOffset);
+            }
+            
+            // Standard Retry
+            await delay(1000);
+            return safeGenerateContent(params, retries - 1, initialDelay, keyOffset);
         }
 
         throw e;
@@ -380,16 +408,16 @@ interface FullGenerationConfig { physics: SubjectConfig; chemistry: SubjectConfi
 
 export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential Execution to prevent Rate Limiting on Preview Models
-    // Increased delay to 10s to ensure we don't hit the 15/20 RPM limit easily with 3 heavy calls
+    // Sequential Execution with rotation awareness
+    // We add small delays to prevent hitting burst limits on a single key if rotation hasn't triggered yet
     
     // 1. Physics
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, config.physics.topics, { mcq: config.physics.mcq, numerical: config.physics.numerical });
-    await delay(10000); // 10s Backoff to match RPM limits
+    await delay(2000); 
 
     // 2. Chemistry
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, config.chemistry.topics, { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical });
-    await delay(10000); 
+    await delay(2000); 
 
     // 3. Mathematics
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, config.mathematics.topics, { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical });
