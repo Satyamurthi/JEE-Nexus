@@ -110,9 +110,9 @@ const Analytics = () => {
             if (raw.endsWith('$') && !raw.startsWith('$')) raw = raw.slice(0, -1);
             if (raw.startsWith('$') && !raw.endsWith('$')) raw = raw.slice(1);
 
-            const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne|text|mathbf|mathcal)/.test(raw) || 
-                            (/[\^_]/.test(raw) && /[{}]/.test(raw)) ||
-                            raw.startsWith('\\');
+            // Comprehensive Regex matching MathText.tsx
+            const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
+            const isLatex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`).test(raw) || raw.startsWith('\\');
             
             if (isLatex) return `$${raw}$`;
         }

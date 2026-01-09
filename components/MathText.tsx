@@ -9,9 +9,8 @@ interface MathTextProps {
 
 /**
  * Robust MathText component that manually parses and renders LaTeX using KaTeX.
- * Optimized with useMemo to prevent unnecessary re-renders.
  * Supports $...$, $$...$$, \(...\), \[...\].
- * Auto-detects raw LaTeX commands (like \frac) even if delimiters are missing or malformed.
+ * Auto-detects and renders raw LaTeX commands in text (like \frac, \int) even if delimiters are missing.
  */
 const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false }) => {
   const htmlContent = useMemo(() => {
@@ -27,95 +26,82 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
       // 1. Normalize line breaks
       let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // 2. Fix common AI latex escape issues
-      // Often AI sends "\\frac" (double backslash in string) which renders as literal \frac
-      // We safely reduce double backslashes for common commands
+      // Comprehensive list of LaTeX commands to detect/fix
+      const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
+
+      // 2. Fix common AI latex escape issues (double backslashes)
+      const doubleEscapeRegex = new RegExp(`\\\\\\\\(${cmdList})`, 'g');
       sanitizedText = sanitizedText
-        .replace(/\\\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne|text|mathbf|mathcal)/g, '\\$1')
+        .replace(doubleEscapeRegex, '\\$1')
         .replace(/\\\\\[/g, '\\[')
         .replace(/\\\\\]/g, '\\]')
         .replace(/\\\\\(/g, '\\(')
         .replace(/\\\\\)/g, '\\)');
 
       // 3. Regex to split content by VALID math delimiters
+      // Matches: $$...$$, \[...\], \begin{}...\end{}, $...$, \(...\)
       const delimiterRegex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\begin\{[a-zA-Z0-9*]+\}[\s\S]*?\\end\{[a-zA-Z0-9*]+\})|(?:\$[\s\S]*?\$)|(?:\\\([\s\S]*?\\\)))/g;
-      
-      const hasValidDelimiters = delimiterRegex.test(sanitizedText);
-      delimiterRegex.lastIndex = 0; // Reset regex index
-
-      // 4. Auto-wrap raw LaTeX if no valid delimiters found
-      if (!hasValidDelimiters) {
-          let raw = sanitizedText.trim();
-          
-          // Fix partial/malformed delimiters (e.g., "x^2$" or "$x^2")
-          let modified = false;
-          if (raw.endsWith('$') && !raw.startsWith('$')) {
-              raw = raw.slice(0, -1);
-              modified = true;
-          } else if (raw.startsWith('$') && !raw.endsWith('$')) {
-              raw = raw.slice(1);
-              modified = true;
-          }
-
-          // Heuristic: If it contains backslash commands or {} groups with math symbols
-          const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne|circ|angle|triangle|text|mathbf|mathcal)/.test(raw) || 
-                          (/[\^_]/.test(raw) && /[{}]/.test(raw)) ||
-                          raw.startsWith('\\');
-          
-          if (isLatex || modified) {
-              sanitizedText = `$${raw}$`;
-          }
-      }
       
       const parts = sanitizedText.split(delimiterRegex);
       
+      // Regex to detect "naked" LaTeX in text parts
+      const isLatexRegex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`);
+
       return parts.map((part) => {
         if (!part) return '';
         
-        // Determine if this part is a math block
-        const isDisplayMath = 
-          (part.startsWith('$$') && part.endsWith('$$')) ||
-          (part.startsWith('\\[') && part.endsWith('\\]')) ||
-          (part.startsWith('\\begin') && part.endsWith('}')); 
-
-        const isInlineMath = 
-          (part.startsWith('$') && part.endsWith('$')) ||
-          (part.startsWith('\\(') && part.endsWith('\\)'));
-
-        if (isDisplayMath || isInlineMath) {
+        // A. If this part is a delimiter-wrapped block, render it
+        if (part.match(/^(\$\$|\\\[|\\\(|\$|\\begin)/)) {
             let content = part;
+            let displayMode = part.startsWith('$$') || part.startsWith('\\[');
             
             if (part.startsWith('$$')) content = part.slice(2, -2);
             else if (part.startsWith('\\[')) content = part.slice(2, -2);
             else if (part.startsWith('$')) content = part.slice(1, -1);
             else if (part.startsWith('\\(')) content = part.slice(2, -2);
-            
-            // Render
-            const renderOptions = {
-                 throwOnError: false, 
-                 trust: true, 
-                 strict: false,
-                 output: 'html', 
-                 displayMode: isDisplayMath || isBlock,
-                 globalGroup: true,
-                 macros: {
-                    "\\RR": "\\mathbb{R}",
-                    "\\NN": "\\mathbb{N}",
-                    "\\ZZ": "\\mathbb{Z}",
-                    "\\QQ": "\\mathbb{Q}",
-                    "\\CC": "\\mathbb{C}"
-                 }
-            };
+            else if (part.startsWith('\\begin')) displayMode = true;
 
             try {
-                return katex.renderToString(content, renderOptions);
+                return katex.renderToString(content, { 
+                    throwOnError: false, 
+                    trust: true, 
+                    strict: false, 
+                    displayMode: displayMode || isBlock,
+                    globalGroup: true
+                });
             } catch (katexErr) {
-                // console.warn("KaTeX render error:", katexErr);
-                return `<span class="text-red-500 font-mono text-xs break-all" title="Render Error">${part}</span>`;
+                return `<span class="text-red-500 font-mono text-xs" title="Render Error">${part}</span>`;
             }
         }
         
-        // Plain Text - escape HTML and handle newlines
+        // B. If it's a Text part, check for un-delimited LaTeX
+        let raw = part;
+        
+        // Heuristic: If it contains LaTeX commands but wasn't caught by delimiter regex, it's likely missing delimiters.
+        // We also clean up "orphan" dollars (e.g. "Value is $50" -> keep as is unless latex found. "Equation $ x^2" -> fix).
+        
+        // Check for latex patterns
+        if (isLatexRegex.test(raw)) {
+             // It has LaTeX commands. Treat this whole text chunk as math.
+             // First, remove any orphan/broken delimiters that might confuse KaTeX
+             // e.g. "\frac{a}{b}$" -> "\frac{a}{b}"
+             let cleanRaw = raw.trim();
+             if (cleanRaw.endsWith('$') && !cleanRaw.startsWith('$')) cleanRaw = cleanRaw.slice(0, -1);
+             if (cleanRaw.startsWith('$') && !cleanRaw.endsWith('$')) cleanRaw = cleanRaw.slice(1);
+             
+             try {
+                 return katex.renderToString(cleanRaw, { 
+                    throwOnError: false, 
+                    trust: true, 
+                    strict: false,
+                    displayMode: false 
+                 });
+             } catch (e) {
+                 // If rendering fails, fallback to text
+             }
+        }
+
+        // C. Plain text - HTML escape
         return part
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
