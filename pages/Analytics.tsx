@@ -6,6 +6,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getDeepAnalysis } from '../geminiService';
 import MathText from '../components/MathText';
 
+const normalizeAnswer = (val: string | number | undefined) => {
+    if (val === undefined || val === null || val === '') return '';
+    const s = val.toString();
+    if (!s.includes(',')) return s.trim();
+    return s.split(',').map(p => p.trim()).sort().join(',');
+};
+
 const Analytics = () => {
   const [result, setResult] = useState<any>(null);
   const [aiInsight, setAiInsight] = useState('');
@@ -107,8 +114,11 @@ const Analytics = () => {
         if (isMCQ && q.options) {
             optionsHtml = `<div class="options-grid">
                 ${q.options.map((opt: string, i: number) => {
-                    const isUserSel = q.userAnswer?.toString() === i.toString();
-                    const isCorrectSel = q.correctAnswer?.toString() === i.toString();
+                    const userSelections = normalizeAnswer(q.userAnswer).split(',');
+                    const correctSelections = normalizeAnswer(q.correctAnswer).split(',');
+                    
+                    const isUserSel = userSelections.includes(i.toString());
+                    const isCorrectSel = correctSelections.includes(i.toString());
                     
                     let optClass = 'opt';
                     if (isCorrectSel) optClass += ' opt-correct';
@@ -544,21 +554,30 @@ const Analytics = () => {
                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-3">Option Analysis</h5>
                                {isMCQ ? (
                                  <div className="space-y-3">
-                                   {q.options.map((opt: string, i: number) => (
+                                   {q.options.map((opt: string, i: number) => {
+                                     // Parse potential multi-answers
+                                     const userSelections = normalizeAnswer(q.userAnswer).split(',');
+                                     const correctSelections = normalizeAnswer(q.correctAnswer).split(',');
+                                     
+                                     const isUserSel = userSelections.includes(i.toString());
+                                     const isCorrectSel = correctSelections.includes(i.toString());
+                                     
+                                     return (
                                      <div 
                                        key={i} 
                                        className={`p-6 rounded-2xl border-2 text-sm flex items-center gap-6 transition-all ${
-                                         i.toString() === q.correctAnswer.toString() 
+                                         isCorrectSel
                                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900 font-bold shadow-xl shadow-emerald-50 scale-[1.02]' 
-                                         : i.toString() === q.userAnswer?.toString()
+                                         : isUserSel
                                          ? 'bg-red-50 border-red-200 text-red-900 font-bold'
                                          : 'bg-white border-slate-100 text-slate-600'
                                        }`}
                                      >
-                                       <span className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shadow-sm ${i.toString() === q.correctAnswer.toString() ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{String.fromCharCode(65 + i)}</span>
+                                       <span className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shadow-sm ${isCorrectSel ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{String.fromCharCode(65 + i)}</span>
                                        <MathText text={opt} className="flex-1" />
+                                       {isUserSel && <span className="text-[10px] uppercase font-black bg-white/50 px-2 py-1 rounded">You</span>}
                                      </div>
-                                   ))}
+                                   )})}
                                  </div>
                                ) : (
                                  <div className="space-y-6">

@@ -42,6 +42,16 @@ const AnimatedTimer = ({ timeLeft, durationMinutes }: { timeLeft: number, durati
   );
 };
 
+// Helper for fuzzy comparison of answers (handles "0,1" vs "1,0" vs "0, 1")
+const normalizeAnswer = (val: string | number | undefined) => {
+    if (val === undefined || val === null || val === '') return '';
+    const s = val.toString();
+    // If numerical (no commas), return trimmed
+    if (!s.includes(',')) return s.trim();
+    // If list, sort and join
+    return s.split(',').map(p => p.trim()).sort().join(',');
+};
+
 const ExamPortal = () => {
   const navigate = useNavigate();
   const [session, setSession] = useState<any>(null);
@@ -76,8 +86,12 @@ const ExamPortal = () => {
     let score = 0;
     const questionResults = currentSession.questions.map((q: Question, idx: number) => {
       const resp = currentResponses[idx];
-      const isCorrect = resp !== undefined && resp !== '' && resp.toString().trim() === q.correctAnswer.toString().trim();
-      if (resp !== undefined && resp !== '') {
+      const normResp = normalizeAnswer(resp);
+      const normCorrect = normalizeAnswer(q.correctAnswer);
+      
+      const isCorrect = normResp !== '' && normResp === normCorrect;
+      
+      if (normResp !== '') {
         if (isCorrect) score += q.markingScheme.positive;
         else score -= q.markingScheme.negative;
       }
@@ -168,6 +182,40 @@ const ExamPortal = () => {
       performSubmission();
   };
 
+  const handleOptionClick = (optionIdx: number) => {
+      const current = responses[currentIdx];
+      let selected: string[] = [];
+      
+      if (current !== undefined && current !== '') {
+          selected = current.toString().split(',').map(s => s.trim());
+      }
+      
+      const optStr = optionIdx.toString();
+      if (selected.includes(optStr)) {
+          selected = selected.filter(s => s !== optStr);
+      } else {
+          selected.push(optStr);
+      }
+      
+      // Sort to ensure consistency (0, 1 instead of 1, 0)
+      selected.sort((a,b) => parseInt(a) - parseInt(b));
+      
+      if (selected.length === 0) {
+          const newR = {...responses};
+          delete newR[currentIdx];
+          setResponses(newR);
+      } else {
+          setResponses({ ...responses, [currentIdx]: selected.join(', ') });
+      }
+  };
+
+  const isOptionSelected = (optionIdx: number) => {
+      const current = responses[currentIdx];
+      if (current === undefined || current === '') return false;
+      const selected = current.toString().split(',').map(s => s.trim());
+      return selected.includes(optionIdx.toString());
+  };
+
   if (!session) return null;
   const currentQuestion: Question = session.questions[currentIdx];
   const isOptionsQuestion = currentQuestion.type === 'MCQ' || (currentQuestion.options && currentQuestion.options.length > 0);
@@ -226,13 +274,18 @@ const ExamPortal = () => {
 
                 {isOptionsQuestion ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {currentQuestion.options?.map((opt, i) => (
-                      <motion.button key={i} whileHover={{ y: -4 }} onClick={() => setResponses({...responses, [currentIdx]: i})}
-                        className={`group flex items-center gap-8 p-8 rounded-[2rem] border-2 transition-all text-left ${responses[currentIdx] === i ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-300 bg-white'}`}>
-                        <span className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-xl transition-all ${responses[currentIdx] === i ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{String.fromCharCode(65 + i)}</span>
-                        <MathText text={opt} className="text-slate-700 font-bold text-lg flex-1" />
-                      </motion.button>
-                    ))}
+                    {currentQuestion.options?.map((opt, i) => {
+                      const selected = isOptionSelected(i);
+                      return (
+                        <motion.button key={i} whileHover={{ y: -4 }} onClick={() => handleOptionClick(i)}
+                          className={`group flex items-center gap-8 p-8 rounded-[2rem] border-2 transition-all text-left ${selected ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-300 bg-white'}`}>
+                          <span className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-xl transition-all ${selected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              {selected ? <CheckCircle2 className="w-6 h-6" /> : String.fromCharCode(65 + i)}
+                          </span>
+                          <MathText text={opt} className="text-slate-700 font-bold text-lg flex-1" />
+                        </motion.button>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="max-w-xl bg-slate-900 p-12 rounded-[3rem] border-4 border-slate-800 mx-auto lg:mx-0 shadow-2xl relative">
