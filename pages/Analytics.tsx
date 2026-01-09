@@ -102,19 +102,18 @@ const Analytics = () => {
         if (!str) return '';
         let raw = str.replace(/\\\\/g, '\\'); // Fix double escapes
         
-        const delimiterRegex = /\$\$|\\\[|\\\(|\$/;
-        const hasValidDelimiters = delimiterRegex.test(raw);
+        // Regex to check for PAIRS of delimiters. If no pairs, we might need to fix.
+        const hasPairedDelimiters = /(\$\$[\s\S]*?\$\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))|(\$[^\$]+\$)/.test(raw);
         
-        if (!hasValidDelimiters) {
-            // Fix partial delimiters
-            if (raw.endsWith('$') && !raw.startsWith('$')) raw = raw.slice(0, -1);
-            if (raw.startsWith('$') && !raw.endsWith('$')) raw = raw.slice(1);
+        if (!hasPairedDelimiters) {
+            // Remove orphan dollars
+            let clean = raw.replace(/\$/g, '');
 
             // Comprehensive Regex matching MathText.tsx
             const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
-            const isLatex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`).test(raw) || raw.startsWith('\\');
+            const isLatex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`).test(clean) || clean.startsWith('\\');
             
-            if (isLatex) return `$${raw}$`;
+            if (isLatex) return `$${clean}$`;
         }
         return raw;
     };

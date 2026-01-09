@@ -83,11 +83,9 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
         // Check for latex patterns
         if (isLatexRegex.test(raw)) {
              // It has LaTeX commands. Treat this whole text chunk as math.
-             // First, remove any orphan/broken delimiters that might confuse KaTeX
-             // e.g. "\frac{a}{b}$" -> "\frac{a}{b}"
-             let cleanRaw = raw.trim();
-             if (cleanRaw.endsWith('$') && !cleanRaw.startsWith('$')) cleanRaw = cleanRaw.slice(0, -1);
-             if (cleanRaw.startsWith('$') && !cleanRaw.endsWith('$')) cleanRaw = cleanRaw.slice(1);
+             // Critical Fix: Remove ALL orphan/broken delimiters (like single $) that confuse KaTeX or indicate broken generation
+             // E.g. "mass density $\mu(x)" -> "mass density \mu(x)" -> KaTeX can render this whole string
+             let cleanRaw = raw.replace(/\$/g, '');
              
              try {
                  return katex.renderToString(cleanRaw, { 
