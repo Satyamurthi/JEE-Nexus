@@ -97,6 +97,28 @@ const Analytics = () => {
         return (order[a.subject as keyof typeof order] || 4) - (order[b.subject as keyof typeof order] || 4);
     });
 
+    // Helper to detect raw latex for the report (Must match MathText logic)
+    const formatForPrint = (str: string) => {
+        if (!str) return '';
+        let raw = str.replace(/\\\\/g, '\\'); // Fix double escapes
+        
+        const delimiterRegex = /\$\$|\\\[|\\\(|\$/;
+        const hasValidDelimiters = delimiterRegex.test(raw);
+        
+        if (!hasValidDelimiters) {
+            // Fix partial delimiters
+            if (raw.endsWith('$') && !raw.startsWith('$')) raw = raw.slice(0, -1);
+            if (raw.startsWith('$') && !raw.endsWith('$')) raw = raw.slice(1);
+
+            const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne|text|mathbf|mathcal)/.test(raw) || 
+                            (/[\^_]/.test(raw) && /[{}]/.test(raw)) ||
+                            raw.startsWith('\\');
+            
+            if (isLatex) return `$${raw}$`;
+        }
+        return raw;
+    };
+
     sortedQuestions.forEach((q: any, idx: number) => {
         const isCorrect = q.isCorrect;
         const isSkipped = q.userAnswer === undefined || q.userAnswer === '';
@@ -109,14 +131,6 @@ const Analytics = () => {
         }
 
         const isMCQ = q.type === 'MCQ' || (q.options && q.options.length > 0);
-
-        // Helper to detect raw latex for the report
-        const formatForPrint = (str: string) => {
-            if (!str) return '';
-            const hasDelimiters = /\$\$|\\\[|\\\(|\$/.test(str);
-            const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne)/.test(str) || (/[\^_]/.test(str) && /[{}]/.test(str));
-            return (!hasDelimiters && isLatex) ? `$${str}$` : str;
-        };
 
         const displayStatement = formatForPrint(q.statement);
         const displaySolution = formatForPrint(q.solution || q.explanation);
