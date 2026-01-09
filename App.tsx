@@ -28,10 +28,7 @@ interface ErrorBoundaryState {
 }
 
 class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';

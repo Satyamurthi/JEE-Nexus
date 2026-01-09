@@ -170,6 +170,7 @@ const ExamPortal = () => {
 
   if (!session) return null;
   const currentQuestion: Question = session.questions[currentIdx];
+  const isOptionsQuestion = currentQuestion.type === 'MCQ' || (currentQuestion.options && currentQuestion.options.length > 0);
   
   const getPaletteStatus = (idx: number) => {
     const id = idx.toString();
@@ -223,9 +224,9 @@ const ExamPortal = () => {
                   </div>
                 </div>
 
-                {currentQuestion.type === 'MCQ' && currentQuestion.options ? (
+                {isOptionsQuestion ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {currentQuestion.options.map((opt, i) => (
+                    {currentQuestion.options?.map((opt, i) => (
                       <motion.button key={i} whileHover={{ y: -4 }} onClick={() => setResponses({...responses, [currentIdx]: i})}
                         className={`group flex items-center gap-8 p-8 rounded-[2rem] border-2 transition-all text-left ${responses[currentIdx] === i ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-300 bg-white'}`}>
                         <span className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-xl transition-all ${responses[currentIdx] === i ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{String.fromCharCode(65 + i)}</span>

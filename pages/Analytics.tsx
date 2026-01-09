@@ -101,8 +101,10 @@ const Analytics = () => {
             statusText = isCorrect ? 'CORRECT' : 'WRONG';
         }
 
+        const isMCQ = q.type === 'MCQ' || (q.options && q.options.length > 0);
+
         let optionsHtml = '';
-        if (q.type === 'MCQ' && q.options) {
+        if (isMCQ && q.options) {
             optionsHtml = `<div class="options-grid">
                 ${q.options.map((opt: string, i: number) => {
                     const isUserSel = q.userAnswer?.toString() === i.toString();
@@ -146,103 +148,105 @@ const Analytics = () => {
     });
 
     const fullHtml = `<!DOCTYPE html>
-        <html>
-        <head>
-            <title>Exam Report - ${userName}</title>
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-            <style>
-                body { font-family: 'Segoe UI', sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #1e293b; }
-                h1, h2, h3 { margin: 0; }
-                .header { text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
-                .meta { display: flex; justify-content: space-between; margin-top: 15px; font-size: 0.9rem; color: #64748b; font-weight: bold; }
-                .score-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 30px; display: flex; justify-content: space-around; }
-                .sc-item h2 { font-size: 2rem; color: #0f172a; }
-                .sc-item p { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-                
-                .q-block { margin-bottom: 30px; border: 1px solid #e2e8f0; padding: 25px; border-radius: 16px; page-break-inside: avoid; }
-                .q-header { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
-                .q-badge { font-size: 0.7rem; font-weight: bold; text-transform: uppercase; background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 6px; }
-                .q-status { margin-left: auto; font-size: 0.7rem; font-weight: bold; border: 1px solid; padding: 4px 8px; border-radius: 6px; }
-                
-                .q-statement { font-size: 1.05rem; margin-bottom: 20px; line-height: 1.6; }
-                
-                .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-                .opt { padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; }
-                .opt-label { font-weight: bold; margin-right: 5px; }
-                .opt-correct { background-color: #dcfce7; border-color: #86efac; color: #14532d; }
-                .opt-wrong { background-color: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
-                .opt-user-correct { background-color: #dcfce7; border-color: #16a34a; border-width: 2px; }
-                
-                .numerical-box { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px dashed #cbd5e1; }
-                
-                .solution-box { margin-top: 20px; background: #f0f9ff; padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6; }
-                .sol-title { font-weight: bold; font-size: 0.8rem; text-transform: uppercase; color: #1e40af; margin-bottom: 10px; }
-                .sol-body { font-size: 0.95rem; line-height: 1.6; }
-                
-                /* Math specific styles */
-                .katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
-                .katex { font-size: 1.1em; }
+<html>
+<head>
+    <title>Exam Report - ${userName}</title>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #1e293b; }
+        h1, h2, h3 { margin: 0; }
+        .header { text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
+        .meta { display: flex; justify-content: space-between; margin-top: 15px; font-size: 0.9rem; color: #64748b; font-weight: bold; }
+        .score-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 30px; display: flex; justify-content: space-around; }
+        .sc-item h2 { font-size: 2rem; color: #0f172a; }
+        .sc-item p { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+        
+        .q-block { margin-bottom: 30px; border: 1px solid #e2e8f0; padding: 25px; border-radius: 16px; page-break-inside: avoid; }
+        .q-header { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .q-badge { font-size: 0.7rem; font-weight: bold; text-transform: uppercase; background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 6px; }
+        .q-status { margin-left: auto; font-size: 0.7rem; font-weight: bold; border: 1px solid; padding: 4px 8px; border-radius: 6px; }
+        
+        .q-statement { font-size: 1.05rem; margin-bottom: 20px; line-height: 1.6; }
+        
+        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .opt { padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; }
+        .opt-label { font-weight: bold; margin-right: 5px; }
+        .opt-correct { background-color: #dcfce7; border-color: #86efac; color: #14532d; }
+        .opt-wrong { background-color: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
+        .opt-user-correct { background-color: #dcfce7; border-color: #16a34a; border-width: 2px; }
+        
+        .numerical-box { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px dashed #cbd5e1; }
+        
+        .solution-box { margin-top: 20px; background: #f0f9ff; padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6; }
+        .sol-title { font-weight: bold; font-size: 0.8rem; text-transform: uppercase; color: #1e40af; margin-bottom: 10px; }
+        .sol-body { font-size: 0.95rem; line-height: 1.6; }
+        
+        /* Math specific styles */
+        .katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
+        .katex { font-size: 1.1em; }
 
-                @media print {
-                    body { padding: 0; }
-                    .no-print { display: none; }
-                    .q-block { break-inside: avoid; }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>JEE Nexus Analysis Report</h1>
-                <div class="meta">
-                    <span>Candidate: ${userName}</span>
-                    <span>Date: ${dateStr}</span>
-                    <span>Exam ID: ${result.id?.substring(0,8).toUpperCase()}</span>
-                </div>
-            </div>
+        @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+            .q-block { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>JEE Nexus Analysis Report</h1>
+        <div class="meta">
+            <span>Candidate: ${userName}</span>
+            <span>Date: ${dateStr}</span>
+            <span>Exam ID: ${result.id?.substring(0,8).toUpperCase()}</span>
+        </div>
+    </div>
 
-            <div class="score-card">
-                <div class="sc-item">
-                    <h2>${result.score} / ${result.totalPossible}</h2>
-                    <p>Total Score</p>
-                </div>
-                <div class="sc-item">
-                    <h2>${result.accuracy}%</h2>
-                    <p>Accuracy</p>
-                </div>
-                <div class="sc-item">
-                    <h2>${sortedQuestions.length}</h2>
-                    <p>Questions</p>
-                </div>
-            </div>
+    <div class="score-card">
+        <div class="sc-item">
+            <h2>${result.score} / ${result.totalPossible}</h2>
+            <p>Total Score</p>
+        </div>
+        <div class="sc-item">
+            <h2>${result.accuracy}%</h2>
+            <p>Accuracy</p>
+        </div>
+        <div class="sc-item">
+            <h2>${sortedQuestions.length}</h2>
+            <p>Questions</p>
+        </div>
+    </div>
 
-            <div class="questions-list">
-                ${contentHtml}
-            </div>
+    <div class="questions-list">
+        ${contentHtml}
+    </div>
 
-            <script>
-                document.addEventListener("DOMContentLoaded", function() {
-                    renderMathInElement(document.body, {
-                      delimiters: [
-                          {left: '$$', right: '$$', display: true},
-                          {left: '$', right: '$', display: false},
-                          {left: '\\(', right: '\\)', display: false},
-                          {left: '\\[', right: '\\]', display: true}
-                      ],
-                      throwOnError : false,
-                      trust: true
-                    });
-                    setTimeout(() => {
-                        window.print();
-                    }, 1500);
-                });
-            </script>
-        </body>
-        </html>
-    `;
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false},
+                    {left: '\\(', right: '\\)', display: false},
+                    {left: '\\[', right: '\\]', display: true}
+                ],
+                throwOnError : false,
+                trust: true
+            });
+            setTimeout(() => {
+                window.print();
+            }, 1500);
+        });
+    </script>
+</body>
+</html>`;
 
+    printWindow.document.open();
     printWindow.document.write(fullHtml);
     printWindow.document.close();
   };
@@ -494,7 +498,10 @@ const Analytics = () => {
           </div>
 
           <div className="space-y-6">
-            {result.questions?.map((q: any, idx: number) => (
+            {result.questions?.map((q: any, idx: number) => {
+              const isMCQ = q.type === 'MCQ' || (q.options && q.options.length > 0);
+              
+              return (
               <motion.div 
                 key={idx} 
                 layout
@@ -535,7 +542,7 @@ const Analytics = () => {
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
                             <div className="space-y-6">
                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-3">Option Analysis</h5>
-                               {q.type === 'MCQ' ? (
+                               {isMCQ ? (
                                  <div className="space-y-3">
                                    {q.options.map((opt: string, i: number) => (
                                      <div 
@@ -595,7 +602,7 @@ const Analytics = () => {
                   )}
                 </AnimatePresence>
               </motion.div>
-            ))}
+            );})}
           </div>
         </div>
       )}

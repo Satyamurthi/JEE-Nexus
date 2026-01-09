@@ -318,6 +318,63 @@ export const refineQuestionText = async (text: string): Promise<string> => {
   }
 };
 
+// Internal Helper for processing a specific batch
+const generateQuestionBatch = async (
+  subject: Subject,
+  batchMcqCount: number,
+  batchNumCount: number,
+  type: ExamType,
+  topicFocus: string
+): Promise<Question[]> => {
+  const count = batchMcqCount + batchNumCount;
+  if (count === 0) return [];
+
+  const prompt = `
+    Act as the Chief Paper Setter for JEE Advanced (IIT-JEE).
+    Your task is to generate exactly ${count} questions of "JEE Advanced" standard for the subject: ${subject}.
+    Target Scope: ${topicFocus}
+    Difficulty Profile: 100% HARD to EXTREME.
+    Structure: ${batchMcqCount} Single/Multi Correct MCQs and ${batchNumCount} Numerical Value Type.
+    GUIDELINES:
+    1. MULTI-CONCEPTUAL: Merge distinct concepts.
+    2. NO DIRECT FORMULAS: Require derivation/analysis.
+    3. NUMERICALS: Integers (0-9) or decimals (2 places).
+    OUTPUT FORMAT:
+    1. Return strictly valid JSON array. Do not use Markdown code blocks.
+    2. Use LaTeX for math ($...$). CRITICAL: You MUST double-escape all backslashes. 
+       Example: Use "\\\\alpha" instead of "\\alpha". Use "\\\\frac" instead of "\\frac".
+    3. markingScheme: {"positive": 4, "negative": 1} for MCQ, {"positive": 4, "negative": 0} for Numerical.
+  `;
+
+  const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  ];
+
+  try {
+    const response = await safeGenerateContent({
+      model: MODEL_ID,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: questionSchema,
+        safetySettings: safetySettings,
+      }
+    });
+
+    const text = extractText(response);
+    if (!text) throw new Error("Empty response from AI");
+
+    const data = cleanAndParseJSON(text);
+    return Array.isArray(data) ? data : [];
+  } catch (error: any) {
+    console.error(`Batch Generation Failure for ${subject}:`, error);
+    return [];
+  }
+};
+
 export const generateJEEQuestions = async (
   subject: Subject,
   count: number,
@@ -357,49 +414,57 @@ export const generateJEEQuestions = async (
     topicFocus = `Generate questions strictly distributed among the following chapters with specific constraints:\n${constraints.join('\n')}`;
   }
 
-  const prompt = `
-    Act as the Chief Paper Setter for JEE Advanced (IIT-JEE).
-    Your task is to generate exactly ${count} questions of "JEE Advanced" standard for the subject: ${subject}.
-    Target Scope: ${topicFocus}
-    Difficulty Profile: 100% HARD to EXTREME.
-    Structure: ${mcqCount} Single/Multi Correct MCQs and ${numericalCount} Numerical Value Type.
-    GUIDELINES:
-    1. MULTI-CONCEPTUAL: Merge distinct concepts.
-    2. NO DIRECT FORMULAS: Require derivation/analysis.
-    3. NUMERICALS: Integers (0-9) or decimals (2 places).
-    OUTPUT FORMAT:
-    1. Return strictly valid JSON array. Do not use Markdown code blocks.
-    2. Use LaTeX for math ($...$). CRITICAL: You MUST double-escape all backslashes. 
-       Example: Use "\\\\alpha" instead of "\\alpha". Use "\\\\frac" instead of "\\frac".
-    3. markingScheme: {"positive": 4, "negative": 1} for MCQ, {"positive": 4, "negative": 0} for Numerical.
-  `;
+  // --- REQUEST BATCHING LOGIC ---
+  const BATCH_SIZE = 5; // Generate in chunks of 5 to avoid LLM timeouts/truncation
+  const totalQuestions = mcqCount + numericalCount;
+  
+  // If count is small, just do one request
+  if (totalQuestions <= BATCH_SIZE) {
+      return generateQuestionBatch(subject, mcqCount, numericalCount, type, topicFocus);
+  }
 
-  const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  ];
+  const batchPromises: Promise<Question[]>[] = [];
+  let remainingMcq = mcqCount;
+  let remainingNum = numericalCount;
+
+  // Calculate number of batches needed
+  const numberOfBatches = Math.ceil(totalQuestions / BATCH_SIZE);
+
+  for (let i = 0; i < numberOfBatches; i++) {
+      let bMcq = 0;
+      let bNum = 0;
+      
+      // Fill current batch up to BATCH_SIZE
+      for(let j=0; j<BATCH_SIZE; j++) {
+          if (remainingMcq > 0) {
+              bMcq++;
+              remainingMcq--;
+          } else if (remainingNum > 0) {
+              bNum++;
+              remainingNum--;
+          }
+      }
+      
+      if (bMcq + bNum > 0) {
+          batchPromises.push(generateQuestionBatch(subject, bMcq, bNum, type, topicFocus));
+      }
+  }
 
   try {
-    const response = await safeGenerateContent({
-      model: MODEL_ID,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: questionSchema,
-        safetySettings: safetySettings,
-      }
-    });
-
-    const text = extractText(response);
-    if (!text) throw new Error("Empty response from AI");
-
-    const data = cleanAndParseJSON(text);
-    return Array.isArray(data) ? data : [];
-  } catch (error: any) {
-    console.error(`Generation Failure for ${subject}:`, error);
-    return [];
+      // Execute all batches in parallel
+      const results = await Promise.all(batchPromises);
+      
+      // Merge results
+      const allQuestions = results.flat();
+      
+      // Re-index IDs to be unique
+      return allQuestions.map((q, idx) => ({
+          ...q,
+          id: `gen-${Date.now()}-${idx}`
+      }));
+  } catch (err) {
+      console.error("Batch aggregation failed:", err);
+      return [];
   }
 };
 
@@ -408,17 +473,13 @@ interface FullGenerationConfig { physics: SubjectConfig; chemistry: SubjectConfi
 
 export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential Execution with rotation awareness
-    // We add small delays to prevent hitting burst limits on a single key if rotation hasn't triggered yet
-    
+    // Sequential Execution of Subjects (internally batched in parallel) to balance load
     // 1. Physics
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, config.physics.topics, { mcq: config.physics.mcq, numerical: config.physics.numerical });
-    await delay(2000); 
-
+    
     // 2. Chemistry
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, config.chemistry.topics, { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical });
-    await delay(2000); 
-
+    
     // 3. Mathematics
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, config.mathematics.topics, { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical });
 
