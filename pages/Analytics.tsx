@@ -110,6 +110,17 @@ const Analytics = () => {
 
         const isMCQ = q.type === 'MCQ' || (q.options && q.options.length > 0);
 
+        // Helper to detect raw latex for the report
+        const formatForPrint = (str: string) => {
+            if (!str) return '';
+            const hasDelimiters = /\$\$|\\\[|\\\(|\$/.test(str);
+            const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne)/.test(str) || (/[\^_]/.test(str) && /[{}]/.test(str));
+            return (!hasDelimiters && isLatex) ? `$${str}$` : str;
+        };
+
+        const displayStatement = formatForPrint(q.statement);
+        const displaySolution = formatForPrint(q.solution || q.explanation);
+
         let optionsHtml = '';
         if (isMCQ && q.options) {
             optionsHtml = `<div class="options-grid">
@@ -125,8 +136,10 @@ const Analytics = () => {
                     if (isUserSel && !isCorrectSel) optClass += ' opt-wrong';
                     if (isUserSel && isCorrectSel) optClass += ' opt-user-correct';
 
+                    const displayOpt = formatForPrint(opt);
+
                     return `<div class="${optClass}">
-                        <span class="opt-label">${String.fromCharCode(65 + i)})</span> ${opt}
+                        <span class="opt-label">${String.fromCharCode(65 + i)})</span> ${displayOpt}
                         ${isUserSel ? '<span style="margin-left:5px; font-weight:bold;">(You)</span>' : ''}
                         ${isCorrectSel ? '<span style="float:right; font-weight:bold;">✓</span>' : ''}
                     </div>`;
@@ -147,11 +160,11 @@ const Analytics = () => {
                     <span class="q-badge" style="background:#f1f5f9; color:#475569;">${q.type}</span>
                     <span class="q-status" style="color:${statusColor}; border-color:${statusColor}">${statusText}</span>
                 </div>
-                <div class="q-statement"><strong>Q${idx + 1}.</strong> ${q.statement}</div>
+                <div class="q-statement"><strong>Q${idx + 1}.</strong> ${displayStatement}</div>
                 ${optionsHtml}
                 <div class="solution-box">
                     <div class="sol-title">Explanation & Solution:</div>
-                    <div class="sol-body">${q.solution || q.explanation}</div>
+                    <div class="sol-body">${displaySolution}</div>
                 </div>
             </div>
         `;

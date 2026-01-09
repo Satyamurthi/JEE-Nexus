@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 
 interface MathTextProps {
@@ -10,6 +11,7 @@ interface MathTextProps {
  * Robust MathText component that manually parses and renders LaTeX using KaTeX.
  * Optimized with useMemo to prevent unnecessary re-renders.
  * Supports $...$, $$...$$, \(...\), \[...\], and generic \begin{env}...\end{env} blocks.
+ * Also auto-detects raw LaTeX commands (like \frac) missing delimiters.
  */
 const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false }) => {
   const htmlContent = useMemo(() => {
@@ -25,12 +27,27 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
       // 1. Normalize line breaks
       let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // 2. Fix common AI latex escape issues
-      // e.g. \\( -> \(
-      sanitizedText = sanitizedText.replace(/\\\\\[/g, '\\[').replace(/\\\\\]/g, '\\]');
-      sanitizedText = sanitizedText.replace(/\\\\\(/g, '\\(').replace(/\\\\\)/g, '\\)');
+      // 2. Fix common AI latex escape issues (delimiters)
+      sanitizedText = sanitizedText
+        .replace(/\\\\\[/g, '\\[')
+        .replace(/\\\\\]/g, '\\]')
+        .replace(/\\\\\(/g, '\\(')
+        .replace(/\\\\\)/g, '\\)');
+
+      // 3. Auto-detect raw LaTeX patterns if no delimiters found
+      // This fixes cases where AI returns raw "\frac{x}{y}" without "$"
+      const hasDelimiters = /\$\$|\\\[|\\\(|\$/.test(sanitizedText);
+      if (!hasDelimiters) {
+          // Heuristic: If it contains backslash commands or {} groups with math symbols
+          const isLatex = /\\(frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|theta|pi|sigma|Delta|nabla|times|cdot|approx|leq|geq|ne)/.test(sanitizedText) || 
+                          (/[\^_]/.test(sanitizedText) && /[{}]/.test(sanitizedText));
+          
+          if (isLatex) {
+              sanitizedText = `$${sanitizedText}$`;
+          }
+      }
       
-      // 3. Regex to split content by math delimiters
+      // 4. Regex to split content by math delimiters
       const regex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\begin\{[a-zA-Z0-9*]+\}[\s\S]*?\\end\{[a-zA-Z0-9*]+\})|(?:\$[\s\S]*?\$)|(?:\\\([\s\S]*?\\\)))/g;
       
       const parts = sanitizedText.split(regex);
