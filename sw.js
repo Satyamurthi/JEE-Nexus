@@ -1,6 +1,6 @@
 
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = 'nexus-v3.2-patch'; // Updated version
+const CACHE_NAME = 'nexus-v3.4-fonts'; // Updated version
 const PRE_CACHE_RESOURCES = [
   '/',
   '/index.html',
@@ -8,6 +8,11 @@ const PRE_CACHE_RESOURCES = [
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap',
   'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css',
+  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Main-Regular.woff2',
+  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Math-Italic.woff2',
+  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Size1-Regular.woff2',
+  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_Size2-Regular.woff2',
+  'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/KaTeX_AMS-Regular.woff2',
   'https://esm.sh/react@^19.2.3',
   'https://esm.sh/react-dom@^19.2.3'
 ];
@@ -26,7 +31,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Nexus SW] Pre-caching Core Shell');
+      console.log('[Nexus SW] Pre-caching Core Shell & Fonts');
       return cache.addAll(PRE_CACHE_RESOURCES);
     })
   );
@@ -77,8 +82,9 @@ self.addEventListener('fetch', (event) => {
 
   // 3. Static/Asset Policy: Cache First, Revalidate in background (SWR)
   const isCdnAsset = AGGRESSIVE_CACHE_HOSTS.some(host => url.hostname.includes(host));
+  const isPreCached = PRE_CACHE_RESOURCES.some(res => url.pathname === res || url.href === res);
   
-  if (isCdnAsset || PRE_CACHE_RESOURCES.includes(url.pathname)) {
+  if (isCdnAsset || isPreCached) {
     event.respondWith(
       caches.match(request).then((cached) => {
         const networkFetch = fetch(request).then((response) => {

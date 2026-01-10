@@ -100,7 +100,8 @@ const Analytics = () => {
     // Helper to detect raw latex for the report (Must match MathText logic)
     const formatForPrint = (str: string) => {
         if (!str) return '';
-        let raw = str.replace(/\\\\/g, '\\'); // Fix double escapes
+        // CRITICAL: Unescape \$ to $ so KaTeX can find the delimiters
+        let raw = str.replace(/\\\\/g, '\\').replace(/\\\\\$/g, '$').replace(/\\\$/g, '$');
         
         // Regex to check for PAIRS of delimiters. If no pairs, we might need to fix.
         const hasPairedDelimiters = /(\$\$[\s\S]*?\$\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))|(\$[^\$]+\$)/.test(raw);

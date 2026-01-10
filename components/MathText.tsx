@@ -23,8 +23,12 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
     }
 
     try {
-      // 1. Normalize line breaks
-      let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      // 1. Normalize line breaks and unescape dollars
+      let sanitizedText = text
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\\\\\$/g, '$') // Unescape \\$ -> $
+        .replace(/\\\$/g, '$');  // Unescape \$ -> $
 
       // Comprehensive list of LaTeX commands to detect/fix
       const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
@@ -70,7 +74,11 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
                     globalGroup: true
                 });
             } catch (katexErr) {
-                return `<span class="text-red-500 font-mono text-xs" title="Render Error">${part}</span>`;
+                // Return escaped raw text instead of red error block to keep UI clean
+                return part
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;');
             }
         }
         
@@ -83,8 +91,7 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
         // Check for latex patterns
         if (isLatexRegex.test(raw)) {
              // It has LaTeX commands. Treat this whole text chunk as math.
-             // Critical Fix: Remove ALL orphan/broken delimiters (like single $) that confuse KaTeX or indicate broken generation
-             // E.g. "mass density $\mu(x)" -> "mass density \mu(x)" -> KaTeX can render this whole string
+             // Remove ALL orphan/broken delimiters (like single $) that confuse KaTeX or indicate broken generation
              let cleanRaw = raw.replace(/\$/g, '');
              
              try {

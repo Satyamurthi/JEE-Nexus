@@ -15,12 +15,12 @@ const config = getModelConfig();
 // Legacy fallback or new fields
 const PROVIDER = config.provider || 'google'; 
 const BASE_URL = config.baseUrl || '';
-// User requested gemini-3.0-preview everywhere. Mapping to available preview tag.
-const MODEL_ID = config.modelId || config.genModel || "gemini-3-flash-preview"; 
+// User requested gemini-2.5-pro-preview as default.
+const MODEL_ID = config.modelId || config.genModel || "gemini-2.5-pro-preview"; 
 
 // Constants for Google
-const VISION_MODEL = config.visionModel || "gemini-3-flash-preview"; 
-const ANALYSIS_MODEL = config.analysisModel || "gemini-3-flash-preview";
+const VISION_MODEL = config.visionModel || "gemini-2.5-pro-preview"; 
+const ANALYSIS_MODEL = config.analysisModel || "gemini-2.5-pro-preview";
 
 // Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -75,11 +75,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * MULTI-KEY ROTATION SYSTEM
  * Handles 429/Quota limits by cycling through a pool of available keys.
  */
-const API_KEY_POOL = [
-  "AIzaSyDmInFBTJ3dA_BmPopd9hALyqh78Dnycqc",
-  "AIzaSyCIpRbTI0HNCU-xD0TBK9oVYau2HymmFjo",
-  "AIzaSyAO_SBZPrmNYM9nyXNdzsjp8gdoKm3Oheo"
-];
+const API_KEY_POOL: string[] = [];
 
 const getAvailableApiKeys = (): string[] => {
   // Start with the hardcoded backup keys
@@ -89,6 +85,17 @@ const getAvailableApiKeys = (): string[] => {
     if (!envVal) return [];
     return envVal.split(',').map(k => k.trim()).filter(k => k);
   };
+
+  // Check Local Storage (Admin Configured Key) - Priority 1
+  if (typeof window !== 'undefined') {
+      try {
+          const localConfig = JSON.parse(localStorage.getItem('nexus_api_config') || '{}');
+          if (localConfig.geminiApiKey) {
+              // Add to the front of the array
+              keys.unshift(localConfig.geminiApiKey);
+          }
+      } catch(e) {}
+  }
 
   // Check process.env (Standard/CRA)
   if (typeof process !== 'undefined' && process.env) {
@@ -201,7 +208,7 @@ const callOpenAICompatible = async (params: any, providerConfig: any) => {
  * Main Wrapper with Multi-Key Rotation
  * Automatically switches keys on 429/403 errors.
  */
-const safeGenerateContent = async (params: any, retries = 3, initialDelay = 3000, keyOffset = 0): Promise<any> => {
+const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000, keyOffset = 0): Promise<any> => {
     // Reload config on every call
     const currentConfig = getModelConfig();
     const currentProvider = currentConfig.provider || 'google';
@@ -209,7 +216,7 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 3000
     try {
         if (currentProvider === 'google') {
             const keys = getAvailableApiKeys();
-            if (keys.length === 0) throw new Error("No API Keys found in pool or environment.");
+            if (keys.length === 0) throw new Error("No API Keys found. Please configure a valid Gemini API Key in Admin Panel > System Settings.");
             
             // Round-robin selection based on retries/offset
             const activeKey = keys[keyOffset % keys.length];
@@ -229,15 +236,24 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 3000
     } catch (e: any) {
         console.warn(`AI Generation Error (Retries: ${retries}, KeyOffset: ${keyOffset}):`, e.message || e);
         
-        // Check for 429 Rate Limit or 403 Quota Exceeded or 503 Overload
-        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.message?.includes('quota') || e.status === 403;
+        // Check for 429 Rate Limit, 403 Quota Exceeded, or RESOURCE_EXHAUSTED
+        // Also check for 400 Invalid Argument which might mean key is bad, rotate if possible
+        const isRateLimit = e.message?.includes('429') || e.status === 429 || 
+                            e.message?.includes('quota') || e.status === 403 || 
+                            e.message?.includes('RESOURCE_EXHAUSTED');
         const isServerOverload = e.message?.includes('503') || e.status === 503;
+        
+        // Sometimes 400 comes up if the key is structurally invalid or empty.
+        // We try next key if we have retries left.
+        const isAuthError = e.message?.includes('400') || e.status === 400 || e.message?.includes('API Key not found');
 
         if (retries > 0) {
-            if (isRateLimit) {
-                // IMMEDIATE ROTATION: Try next key without waiting
-                console.log("Quota limit hit. Rotating to next API Key immediately...");
-                return safeGenerateContent(params, retries - 1, 500, keyOffset + 1);
+            if (isRateLimit || isAuthError) {
+                // IMMEDIATE ROTATION WITH BACKOFF
+                console.log(`API Limit/Auth Issue (Offset: ${keyOffset}). Rotating to next API Key...`);
+                // Wait a bit even when rotating, as some limits are IP based
+                await delay(initialDelay);
+                return safeGenerateContent(params, retries - 1, initialDelay * 1.5, keyOffset + 1);
             }
             
             if (isServerOverload) {
@@ -418,18 +434,15 @@ export const generateJEEQuestions = async (
   const BATCH_SIZE = 5; // Generate in chunks of 5 to avoid LLM timeouts/truncation
   const totalQuestions = mcqCount + numericalCount;
   
-  // If count is small, just do one request
-  if (totalQuestions <= BATCH_SIZE) {
-      return generateQuestionBatch(subject, mcqCount, numericalCount, type, topicFocus);
-  }
-
-  const batchPromises: Promise<Question[]>[] = [];
+  // Calculate number of batches needed
+  const numberOfBatches = Math.ceil(totalQuestions / BATCH_SIZE);
+  
+  const allQuestions: Question[] = [];
   let remainingMcq = mcqCount;
   let remainingNum = numericalCount;
 
-  // Calculate number of batches needed
-  const numberOfBatches = Math.ceil(totalQuestions / BATCH_SIZE);
-
+  // IMPORTANT: Execute batches SEQUENTIALLY to avoid hitting 429 Rate Limits
+  // Parallel execution (Promise.all) causes quota exhaustion on free tiers
   for (let i = 0; i < numberOfBatches; i++) {
       let bMcq = 0;
       let bNum = 0;
@@ -446,26 +459,28 @@ export const generateJEEQuestions = async (
       }
       
       if (bMcq + bNum > 0) {
-          batchPromises.push(generateQuestionBatch(subject, bMcq, bNum, type, topicFocus));
+          try {
+              // Call API for this batch
+              const batchResults = await generateQuestionBatch(subject, bMcq, bNum, type, topicFocus);
+              allQuestions.push(...batchResults);
+              
+              // Add a deliberate delay between batches to respect RPM limits
+              // 2 seconds delay significantly reduces chance of 429 error
+              if (i < numberOfBatches - 1) {
+                  await delay(2000); 
+              }
+          } catch (e) {
+              console.error(`Batch ${i+1}/${numberOfBatches} failed for ${subject}`, e);
+              // Continue to next batch, do not fail entire generation
+          }
       }
   }
 
-  try {
-      // Execute all batches in parallel
-      const results = await Promise.all(batchPromises);
-      
-      // Merge results
-      const allQuestions = results.flat();
-      
-      // Re-index IDs to be unique
-      return allQuestions.map((q, idx) => ({
-          ...q,
-          id: `gen-${Date.now()}-${idx}`
-      }));
-  } catch (err) {
-      console.error("Batch aggregation failed:", err);
-      return [];
-  }
+  // Re-index IDs to be unique
+  return allQuestions.map((q, idx) => ({
+      ...q,
+      id: `gen-${Date.now()}-${idx}`
+  }));
 };
 
 interface SubjectConfig { mcq: number; numerical: number; chapters: string[]; topics: string[]; }
@@ -473,13 +488,19 @@ interface FullGenerationConfig { physics: SubjectConfig; chemistry: SubjectConfi
 
 export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential Execution of Subjects (internally batched in parallel) to balance load
+    // Sequential Execution of Subjects with INTER-SUBJECT DELAY
+    // This is crucial to avoid quota exhaustion when switching from one heavy batch to the next.
+    
     // 1. Physics
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, config.physics.topics, { mcq: config.physics.mcq, numerical: config.physics.numerical });
     
+    await delay(3000); // 3s cool-down between subjects
+
     // 2. Chemistry
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, config.chemistry.topics, { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical });
     
+    await delay(3000); // 3s cool-down between subjects
+
     // 3. Mathematics
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, config.mathematics.topics, { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical });
 
