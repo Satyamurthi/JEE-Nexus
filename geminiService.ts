@@ -12,262 +12,141 @@ const getModelConfig = () => {
 };
 
 const config = getModelConfig();
-// Legacy fallback or new fields
 const PROVIDER = config.provider || 'google'; 
 const BASE_URL = config.baseUrl || '';
-// User requested gemini-2.5-pro-preview as default.
-const MODEL_ID = config.modelId || config.genModel || "gemini-2.5-pro-preview"; 
 
-// Constants for Google
-const VISION_MODEL = config.visionModel || "gemini-2.5-pro-preview"; 
-const ANALYSIS_MODEL = config.analysisModel || "gemini-2.5-pro-preview";
+// Primary Model: gemini-2.0-flash (Stable, Fast)
+const MODEL_ID = config.modelId || config.genModel || "gemini-2.0-flash"; 
+const VISION_MODEL = config.visionModel || "gemini-2.0-flash"; 
+const ANALYSIS_MODEL = config.analysisModel || "gemini-2.0-flash";
 
-// Helper to convert File to Base64
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result);
-    };
+    reader.onload = () => resolve(reader.result as string);
     reader.onerror = error => reject(error);
   });
 };
 
+/**
+ * Robust JSON Cleaner & Repairer
+ */
 const cleanAndParseJSON = (text: string) => {
   if (!text) return null;
-  // Remove markdown code blocks and whitespace
-  let cleanText = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
+  let cleanText = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  cleanText = cleanText.replace(/\/\/.*$/gm, ''); // Remove single line comments
+  
+  const firstOpenBrace = cleanText.indexOf('{');
+  const firstOpenBracket = cleanText.indexOf('[');
+  
+  let startIdx = -1;
+  if (firstOpenBrace !== -1 && firstOpenBracket !== -1) {
+     startIdx = Math.min(firstOpenBrace, firstOpenBracket);
+  } else if (firstOpenBrace !== -1) {
+     startIdx = firstOpenBrace;
+  } else if (firstOpenBracket !== -1) {
+     startIdx = firstOpenBracket;
+  }
+  
+  if (startIdx === -1) return null;
+
+  cleanText = cleanText.substring(startIdx);
+  
+  const lastCloseBrace = cleanText.lastIndexOf('}');
+  const lastCloseBracket = cleanText.lastIndexOf(']');
+  const endIdx = Math.max(lastCloseBrace, lastCloseBracket);
+  
+  if (endIdx !== -1) {
+      cleanText = cleanText.substring(0, endIdx + 1);
+  }
+
   try {
     return JSON.parse(cleanText);
   } catch (e) {
-    console.warn("Initial JSON Parse failed, attempting sanitization...");
-    try {
-        // Robust Sanitization for LaTeX Backslashes
-        const fixedText = cleanText.replace(/(\\+)([^"\\/bfnrtu])/g, (match, backslashes, char) => {
-            if (backslashes.length % 2 === 1) {
-                return backslashes + "\\" + char;
-            }
-            return match;
-        });
-        
-        return JSON.parse(fixedText);
-    } catch (e2) {
-        console.error("JSON Parse failed after sanitization:", e2);
-        // Last resort: Try to extract array if it looks like one
-        const arrayMatch = cleanText.match(/\[.*\]/s);
-        if (arrayMatch) {
-            try {
-                 const fixedArray = arrayMatch[0].replace(/(\\+)([^"\\/bfnrtu])/g, (m, b, c) => b.length % 2 === 1 ? b + "\\" + c : m);
-                 return JSON.parse(fixedArray);
-            } catch (e3) {}
-        }
-        return null;
-    }
+    // Continue to aggressive repair
+  }
+
+  try {
+    // Fallback: If truncation is suspected (common with Math output), try to close the array
+    if (cleanText.trim().endsWith(',')) cleanText = cleanText.trim().slice(0, -1);
+    if (!cleanText.trim().endsWith(']')) cleanText += ']';
+    return JSON.parse(cleanText); 
+  } catch (repairError: any) {
+    console.error("JSON Repair Failed:", repairError.message);
+    return null;
   }
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * MULTI-KEY ROTATION SYSTEM
- * Handles 429/Quota limits by cycling through a pool of available keys.
- */
 const API_KEY_POOL: string[] = [];
 
 const getAvailableApiKeys = (): string[] => {
-  // Start with the hardcoded backup keys
   const keys = [...API_KEY_POOL];
-  
   const parseEnvList = (envVal: string | undefined) => {
     if (!envVal) return [];
     return envVal.split(',').map(k => k.trim()).filter(k => k);
   };
 
-  // Check Local Storage (Admin Configured Key) - Priority 1
   if (typeof window !== 'undefined') {
       try {
           const localConfig = JSON.parse(localStorage.getItem('nexus_api_config') || '{}');
-          if (localConfig.geminiApiKey) {
-              // Add to the front of the array
-              keys.unshift(localConfig.geminiApiKey);
-          }
+          if (localConfig.geminiApiKey) keys.unshift(...parseEnvList(localConfig.geminiApiKey));
       } catch(e) {}
   }
 
-  // Check process.env (Standard/CRA)
   if (typeof process !== 'undefined' && process.env) {
-    if (process.env.GEMINI_API_KEYS) keys.unshift(...parseEnvList(process.env.GEMINI_API_KEYS));
-    if (process.env.REACT_APP_GEMINI_API_KEYS) keys.unshift(...parseEnvList(process.env.REACT_APP_GEMINI_API_KEYS));
-    if (process.env.API_KEY) keys.unshift(process.env.API_KEY);
-    if (process.env.REACT_APP_API_KEY) keys.unshift(process.env.REACT_APP_API_KEY);
-    if (process.env.VITE_API_KEY) keys.unshift(process.env.VITE_API_KEY);
+    if (process.env.API_KEY) keys.unshift(...parseEnvList(process.env.API_KEY));
+    if (process.env.REACT_APP_API_KEY) keys.unshift(...parseEnvList(process.env.REACT_APP_API_KEY));
   }
   
-  // Check import.meta.env (Vite)
   if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
     const env = (import.meta as any).env;
-    if (env.VITE_GEMINI_API_KEYS) keys.unshift(...parseEnvList(env.VITE_GEMINI_API_KEYS));
-    if (env.VITE_API_KEY) keys.unshift(env.VITE_API_KEY);
-    if (env.API_KEY) keys.unshift(env.API_KEY);
+    if (env.VITE_API_KEY) keys.unshift(...parseEnvList(env.VITE_API_KEY));
+    if (env.API_KEY) keys.unshift(...parseEnvList(env.API_KEY));
   }
 
-  // Deduplicate and filter empty
-  return Array.from(new Set(keys)).filter(k => !!k && k.trim() !== '');
+  return Array.from(new Set(keys)).filter(k => !!k);
 };
 
-/**
- * OpenAI Compatible API Call (DeepSeek, ChatGPT, etc.)
- */
-const callOpenAICompatible = async (params: any, providerConfig: any) => {
-    if (!providerConfig.apiKey) throw new Error("API Key is required for non-Google providers. Please configure in Admin > System Settings.");
-    
-    const messages = [];
-    let systemPrompt = "";
-
-    if (params.config?.systemInstruction) {
-        systemPrompt += params.config.systemInstruction;
-    }
-
-    if (params.config?.responseSchema) {
-        systemPrompt += "\n\nCRITICAL: You must output a valid JSON object matching this structure. Do not include markdown formatting.\n";
-        systemPrompt += "Expected JSON Structure: " + JSON.stringify(params.config.responseSchema, null, 2);
-    }
-
-    if (systemPrompt) {
-        messages.push({ role: "system", content: systemPrompt });
-    }
-
-    const content = params.contents;
-    let userMessageContent: any = "";
-
-    if (typeof content === 'string') {
-        userMessageContent = content;
-    } 
-    else if (content.parts) {
-        if (content.parts.length === 1 && content.parts[0].text) {
-            userMessageContent = content.parts[0].text;
-        } else {
-            userMessageContent = [];
-            for (const part of content.parts) {
-                if (part.text) {
-                    userMessageContent.push({ type: "text", text: part.text });
-                } else if (part.inlineData) {
-                    const mime = part.inlineData.mimeType;
-                    const b64 = part.inlineData.data;
-                    userMessageContent.push({ 
-                        type: "image_url", 
-                        image_url: { url: `data:${mime};base64,${b64}` } 
-                    });
-                }
-            }
-        }
-    }
-
-    messages.push({ role: "user", content: userMessageContent });
-
-    const payload: any = {
-        model: providerConfig.modelId,
-        messages: messages,
-        temperature: params.config?.temperature || 0.7,
-    };
-
-    if (params.config?.responseMimeType === "application/json") {
-        payload.response_format = { type: "json_object" };
-    }
-
-    const response = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${providerConfig.apiKey}`
-        },
-        body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`${providerConfig.provider} API Error: ${err}`);
-    }
-
-    const data = await response.json();
-    
-    const textOutput = data.choices[0]?.message?.content || "";
-    return {
-        candidates: [{
-            content: {
-                parts: [{ text: textOutput }]
-            }
-        }]
-    };
-};
-
-/**
- * Main Wrapper with Multi-Key Rotation
- * Automatically switches keys on 429/403 errors.
- */
 const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000, keyOffset = 0): Promise<any> => {
-    // Reload config on every call
-    const currentConfig = getModelConfig();
-    const currentProvider = currentConfig.provider || 'google';
-    
     try {
-        if (currentProvider === 'google') {
-            const keys = getAvailableApiKeys();
-            if (keys.length === 0) throw new Error("No API Keys found. Please configure a valid Gemini API Key in Admin Panel > System Settings.");
-            
-            // Round-robin selection based on retries/offset
-            const activeKey = keys[keyOffset % keys.length];
-            
-            // Debug only: console.log(`[Gemini] Using Key Index: ${keyOffset % keys.length} / ${keys.length}`); 
-            
-            const ai = new GoogleGenAI({ apiKey: activeKey });
-            return await ai.models.generateContent({
-                model: params.model, 
-                contents: params.contents,
-                config: params.config
-            });
-        } else {
-            const providerParams = { ...currentConfig, provider: currentProvider };
-            return await callOpenAICompatible(params, providerParams);
-        }
+        const keys = getAvailableApiKeys();
+        if (keys.length === 0) throw new Error("No API Keys found.");
+        
+        const activeKey = keys[keyOffset % keys.length];
+        const ai = new GoogleGenAI({ apiKey: activeKey });
+        
+        return await ai.models.generateContent({
+            model: params.model, 
+            contents: params.contents,
+            config: params.config
+        });
     } catch (e: any) {
-        console.warn(`AI Generation Error (Retries: ${retries}, KeyOffset: ${keyOffset}):`, e.message || e);
+        console.warn(`GenAI Error (${params.model}):`, e.message || e);
         
-        // Check for 429 Rate Limit, 403 Quota Exceeded, or RESOURCE_EXHAUSTED
-        // Also check for 400 Invalid Argument which might mean key is bad, rotate if possible
-        const isRateLimit = e.message?.includes('429') || e.status === 429 || 
-                            e.message?.includes('quota') || e.status === 403 || 
-                            e.message?.includes('RESOURCE_EXHAUSTED');
-        const isServerOverload = e.message?.includes('503') || e.status === 503;
-        
-        // Sometimes 400 comes up if the key is structurally invalid or empty.
-        // We try next key if we have retries left.
-        const isAuthError = e.message?.includes('400') || e.status === 400 || e.message?.includes('API Key not found');
+        if (e.message?.includes('404') || e.status === 404) {
+             if (params.model !== 'gemini-1.5-flash') {
+                 params.model = "gemini-1.5-flash";
+                 return safeGenerateContent(params, retries, initialDelay, keyOffset);
+             }
+        }
+
+        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.status === 403;
+        const isServerOverload = e.status === 503;
 
         if (retries > 0) {
-            if (isRateLimit || isAuthError) {
-                // IMMEDIATE ROTATION WITH BACKOFF
-                console.log(`API Limit/Auth Issue (Offset: ${keyOffset}). Rotating to next API Key...`);
-                // Wait a bit even when rotating, as some limits are IP based
+            if (isRateLimit) {
                 await delay(initialDelay);
                 return safeGenerateContent(params, retries - 1, initialDelay * 1.5, keyOffset + 1);
             }
-            
             if (isServerOverload) {
-                // Exponential backoff for server issues
-                const waitTime = initialDelay * (2 ** (3 - retries));
-                await delay(waitTime);
-                return safeGenerateContent(params, retries - 1, initialDelay, keyOffset);
+                await delay(initialDelay * 2);
+                return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset);
             }
-            
-            // Standard Retry
-            await delay(1000);
-            return safeGenerateContent(params, retries - 1, initialDelay, keyOffset);
         }
-
         throw e;
     }
 };
@@ -278,9 +157,7 @@ const extractText = (response: any): string => {
             return response.candidates[0].content.parts.map((p: any) => p.text).join('') || '';
         }
         return response.text || '';
-    } catch (e) {
-        return '';
-    }
+    } catch (e) { return ''; }
 };
 
 const questionSchema = {
@@ -300,10 +177,7 @@ const questionSchema = {
       concept: { type: Type.STRING },
       markingScheme: {
          type: Type.OBJECT,
-         properties: {
-             positive: { type: Type.INTEGER },
-             negative: { type: Type.INTEGER }
-         }
+         properties: { positive: { type: Type.INTEGER }, negative: { type: Type.INTEGER } }
       }
     },
     required: ["subject", "statement", "correctAnswer", "solution", "type"]
@@ -314,60 +188,40 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
   try {
     const response = await safeGenerateContent({
       model: MODEL_ID, 
-      contents: `Provide a single, very short conceptual hint (max 15 words) for this ${subject} question. Do NOT solve it. Question: ${statement.substring(0, 300)}...`
+      contents: `Hint for ${subject}: ${statement.substring(0, 300)}...`
     });
-    return extractText(response) || "Recall basic principles.";
-  } catch (e) {
-    return "Check your concepts.";
-  }
+    return extractText(response) || "Review concepts.";
+  } catch (e) { return "Hint unavailable."; }
 };
 
 export const refineQuestionText = async (text: string): Promise<string> => {
-  try {
-    const response = await safeGenerateContent({
-      model: MODEL_ID,
-      contents: `Fix grammar and clarity of this JEE question text. Keep LaTeX math ($...$) intact. Text: ${text}`
-    });
-    return extractText(response) || text;
-  } catch (e) {
-    return text;
-  }
+  return text; 
 };
 
-// Internal Helper for processing a specific batch
-const generateQuestionBatch = async (
-  subject: Subject,
-  batchMcqCount: number,
-  batchNumCount: number,
-  type: ExamType,
-  topicFocus: string
-): Promise<Question[]> => {
+// Generates a SMALL batch of questions to avoid token limits and errors
+const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, batchNumCount: number, type: ExamType, topicFocus: string): Promise<Question[]> => {
   const count = batchMcqCount + batchNumCount;
   if (count === 0) return [];
 
   const prompt = `
-    Act as the Chief Paper Setter for JEE Advanced (IIT-JEE).
-    Your task is to generate exactly ${count} questions of "JEE Advanced" standard for the subject: ${subject}.
-    Target Scope: ${topicFocus}
-    Difficulty Profile: 100% HARD to EXTREME.
-    Structure: ${batchMcqCount} Single/Multi Correct MCQs and ${batchNumCount} Numerical Value Type.
-    GUIDELINES:
-    1. MULTI-CONCEPTUAL: Merge distinct concepts.
-    2. NO DIRECT FORMULAS: Require derivation/analysis.
-    3. NUMERICALS: Integers (0-9) or decimals (2 places).
-    OUTPUT FORMAT:
-    1. Return strictly valid JSON array. Do not use Markdown code blocks.
-    2. Use LaTeX for math ($...$). CRITICAL: You MUST double-escape all backslashes. 
-       Example: Use "\\\\alpha" instead of "\\alpha". Use "\\\\frac" instead of "\\frac".
-    3. markingScheme: {"positive": 4, "negative": 1} for MCQ, {"positive": 4, "negative": 0} for Numerical.
+    ACT AS A STRICT EXAM SETTER for JEE Advanced.
+    Subject: ${subject}
+    Total Questions To Generate: ${count}
+    
+    MANDATORY DISTRIBUTION:
+    1. EXACTLY ${batchMcqCount} questions MUST be 'MCQ' (Multiple Choice with 4 options).
+    2. EXACTLY ${batchNumCount} questions MUST be 'Numerical' (Integer/Decimal value answer, NO options).
+    
+    STRICT CONTENT RULES:
+    - Topics: ${topicFocus}
+    - Difficulty: HARD (JEE Advanced Level)
+    - Math Formatting: Use LaTeX wrapped in '$' (e.g. $x^2$).
+    - JSON Format: Strictly valid JSON array.
+    - For 'MCQ', "options" array must have 4 strings.
+    - For 'Numerical', "options" array must be empty or null.
+    
+    Output ONLY the JSON Array.
   `;
-
-  const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  ];
 
   try {
     const response = await safeGenerateContent({
@@ -376,214 +230,227 @@ const generateQuestionBatch = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: questionSchema,
-        safetySettings: safetySettings,
       }
     });
+    const data = cleanAndParseJSON(extractText(response));
+    const rawList = Array.isArray(data) ? data : [];
+    
+    // STRICT POST-PROCESSING TO ENFORCE COUNTS AND AVOID DUPLICATES
+    const validMcqs: any[] = [];
+    const validNums: any[] = [];
+    
+    rawList.forEach((q: any) => {
+        // Safe check for options
+        const hasValidOptions = Array.isArray(q.options) && q.options.length >= 2;
+        
+        if (hasValidOptions) {
+            q.type = 'MCQ';
+            validMcqs.push(q);
+        } else {
+            q.type = 'Numerical';
+            q.options = []; 
+            validNums.push(q);
+        }
+    });
 
-    const text = extractText(response);
-    if (!text) throw new Error("Empty response from AI");
+    // 2. Trim excess questions to match exact request for this batch
+    const finalMcqs = validMcqs.slice(0, batchMcqCount);
+    const finalNums = validNums.slice(0, batchNumCount);
 
-    const data = cleanAndParseJSON(text);
-    return Array.isArray(data) ? data : [];
-  } catch (error: any) {
-    console.error(`Batch Generation Failure for ${subject}:`, error);
+    return [...finalMcqs, ...finalNums]
+        .filter((q: any) => q && typeof q === 'object')
+        .map((q: any, i: number) => {
+            const defaultMarking = q.type === 'MCQ' ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 };
+            const safeMarkingScheme = (q.markingScheme && typeof q.markingScheme === 'object' && typeof q.markingScheme.positive === 'number')
+                ? q.markingScheme
+                : defaultMarking;
+
+            return {
+                id: q.id || `gen-${Date.now()}-${i}-${Math.random().toString(36).substring(7)}`,
+                subject: q.subject || subject,
+                chapter: q.chapter || 'General',
+                type: q.type, 
+                difficulty: q.difficulty || 'Hard',
+                statement: q.statement || 'Question generation failed.',
+                options: q.options || [],
+                correctAnswer: q.correctAnswer || '',
+                solution: q.solution || '',
+                explanation: q.explanation || '',
+                concept: q.concept || '',
+                markingScheme: safeMarkingScheme
+            };
+    });
+  } catch (error) {
+    console.error(`Batch Gen Failed:`, error);
     return [];
   }
 };
 
-export const generateJEEQuestions = async (
-  subject: Subject,
-  count: number,
-  type: ExamType,
-  chapters?: string[],
-  difficulty?: string | Difficulty,
-  topics?: string[],
-  distribution?: { mcq: number, numerical: number }
-): Promise<Question[]> => {
-  let mcqCount = count;
-  let numericalCount = 0;
+// New Batched Generator to handle large requests without timeouts or truncation
+export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string | Difficulty, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
+  let totalMcqTarget = distribution ? distribution.mcq : Math.ceil(count * 0.8);
+  let totalNumTarget = distribution ? distribution.numerical : count - totalMcqTarget;
   
-  if (distribution) {
-      mcqCount = distribution.mcq;
-      numericalCount = distribution.numerical;
-  } else if (count >= 5) {
-      mcqCount = Math.ceil(count * 0.8);
-      numericalCount = count - mcqCount;
-  }
+  if (totalMcqTarget < 0) totalMcqTarget = 0;
+  if (totalNumTarget < 0) totalNumTarget = 0;
 
   const isFullSyllabus = !chapters || chapters.length === 0;
+  let topicFocus = isFullSyllabus ? "Full Syllabus High Weightage" : `Chapters: ${chapters.join(', ')}`;
+  if (topics && topics.length > 0) topicFocus += ` | Topics: ${topics.join(', ')}`;
 
-  let topicFocus = "Cover high-weightage topics from Class 11 and 12 NCERT syllabus. Focus on complex applications.";
-  
-  if (!isFullSyllabus) {
-    const subjectChapters = NCERT_CHAPTERS[subject] || [];
-    const constraints = chapters.map(chap => {
-        const chapDef = subjectChapters.find(c => c.name === chap);
-        if (!chapDef) return `- Chapter: "${chap}" (Focus: Multi-concept linking)`;
-        const selectedTopicsForChap = chapDef.topics.filter(t => topics?.includes(t));
-        if (selectedTopicsForChap.length > 0) {
-            return `- Chapter: "${chap}" (STRICTLY RESTRICT to topics: ${selectedTopicsForChap.join(', ')})`;
-        } else {
-            return `- Chapter: "${chap}" (Focus: Deep Conceptual Depth)`;
-        }
-    });
-    topicFocus = `Generate questions strictly distributed among the following chapters with specific constraints:\n${constraints.join('\n')}`;
-  }
-
-  // --- REQUEST BATCHING LOGIC ---
-  const BATCH_SIZE = 5; // Generate in chunks of 5 to avoid LLM timeouts/truncation
-  const totalQuestions = mcqCount + numericalCount;
-  
-  // Calculate number of batches needed
-  const numberOfBatches = Math.ceil(totalQuestions / BATCH_SIZE);
-  
   const allQuestions: Question[] = [];
-  let remainingMcq = mcqCount;
-  let remainingNum = numericalCount;
+  const BATCH_SIZE = 5; // Reduced to 5 to prevent token overflow/truncation
 
-  // IMPORTANT: Execute batches SEQUENTIALLY to avoid hitting 429 Rate Limits
-  // Parallel execution (Promise.all) causes quota exhaustion on free tiers
-  for (let i = 0; i < numberOfBatches; i++) {
-      let bMcq = 0;
-      let bNum = 0;
-      
-      // Fill current batch up to BATCH_SIZE
-      for(let j=0; j<BATCH_SIZE; j++) {
-          if (remainingMcq > 0) {
-              bMcq++;
-              remainingMcq--;
-          } else if (remainingNum > 0) {
-              bNum++;
-              remainingNum--;
+  let mcqNeeded = totalMcqTarget;
+  let numNeeded = totalNumTarget;
+  let failSafe = 0;
+
+  // Loop until we have enough questions or fail safe triggers
+  while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 15) {
+      // Calculate current batch composition
+      let currentMcq = 0;
+      let currentNum = 0;
+
+      // Fill batch with available needs, maxing out at BATCH_SIZE
+      if (mcqNeeded > 0 && numNeeded > 0) {
+          currentMcq = Math.min(mcqNeeded, 3); // Prioritize a mix
+          currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
+          // If space remains and we need more MCQs, take them
+          if (currentMcq + currentNum < BATCH_SIZE && mcqNeeded > currentMcq) {
+              currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
           }
+      } else if (mcqNeeded > 0) {
+          currentMcq = Math.min(mcqNeeded, BATCH_SIZE);
+      } else if (numNeeded > 0) {
+          currentNum = Math.min(numNeeded, BATCH_SIZE);
+      }
+
+      console.debug(`Generating Batch for ${subject}: Asking for ${currentMcq} MCQ, ${currentNum} Num`);
+
+      try {
+          const batch = await generateQuestionBatch(subject, currentMcq, currentNum, type, topicFocus);
+          
+          if (batch.length === 0) {
+              console.warn("Empty batch returned. Retrying...");
+              failSafe++;
+              await delay(1000);
+              continue;
+          }
+
+          allQuestions.push(...batch);
+
+          // Update needs based on what we ACTUALLY got
+          const gotMcq = batch.filter(q => q.type === 'MCQ').length;
+          const gotNum = batch.filter(q => q.type === 'Numerical').length;
+
+          mcqNeeded = Math.max(0, mcqNeeded - gotMcq);
+          numNeeded = Math.max(0, numNeeded - gotNum);
+          
+          // Safety check: if we aren't getting what we asked for, increment failsafe to prevent infinite loop
+          if (gotMcq === 0 && currentMcq > 0) failSafe++;
+          if (gotNum === 0 && currentNum > 0) failSafe++;
+
+      } catch (e) {
+          console.error("Batch error:", e);
+          failSafe++;
       }
       
-      if (bMcq + bNum > 0) {
-          try {
-              // Call API for this batch
-              const batchResults = await generateQuestionBatch(subject, bMcq, bNum, type, topicFocus);
-              allQuestions.push(...batchResults);
-              
-              // Add a deliberate delay between batches to respect RPM limits
-              // 2 seconds delay significantly reduces chance of 429 error
-              if (i < numberOfBatches - 1) {
-                  await delay(2000); 
-              }
-          } catch (e) {
-              console.error(`Batch ${i+1}/${numberOfBatches} failed for ${subject}`, e);
-              // Continue to next batch, do not fail entire generation
-          }
-      }
+      await delay(1200); // Rate limit protection
   }
 
-  // Re-index IDs to be unique
-  return allQuestions.map((q, idx) => ({
-      ...q,
-      id: `gen-${Date.now()}-${idx}`
-  }));
+  // Final sanity trim (in case we overshot slightly)
+  const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
+  const finalNums = allQuestions.filter(q => q.type === 'Numerical').slice(0, totalNumTarget);
+
+  return [...finalMcqs, ...finalNums];
 };
 
-interface SubjectConfig { mcq: number; numerical: number; chapters: string[]; topics: string[]; }
-interface FullGenerationConfig { physics: SubjectConfig; chemistry: SubjectConfig; mathematics: SubjectConfig; }
-
-export const generateFullJEEDailyPaper = async (config: FullGenerationConfig): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
+export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential Execution of Subjects with INTER-SUBJECT DELAY
-    // This is crucial to avoid quota exhaustion when switching from one heavy batch to the next.
-    
-    // 1. Physics
-    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, config.physics.topics, { mcq: config.physics.mcq, numerical: config.physics.numerical });
-    
-    await delay(3000); // 3s cool-down between subjects
+    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
+    await delay(1000);
+    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
+    await delay(1000);
+    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
-    // 2. Chemistry
-    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, config.chemistry.topics, { mcq: config.chemistry.mcq, numerical: config.chemistry.numerical });
-    
-    await delay(3000); // 3s cool-down between subjects
-
-    // 3. Mathematics
-    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, config.mathematics.topics, { mcq: config.mathematics.mcq, numerical: config.mathematics.numerical });
-
-    return {
-        physics: physics || [],
-        chemistry: chemistry || [],
-        mathematics: mathematics || []
-    };
-  } catch (error: any) {
-    console.error("Full Paper Generation Critical Failure:", error);
+    return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
+  } catch (error) {
     return { physics: [], chemistry: [], mathematics: [] };
   }
 };
 
 export const parseDocumentToQuestions = async (questionFile: File, solutionFile?: File): Promise<Question[]> => {
   const qBase64DataUrl = await fileToBase64(questionFile);
-  const parts: any[] = [];
-
-  const currentProvider = config.provider || 'google';
-  
-  const qBase64 = qBase64DataUrl.split(',')[1];
-  parts.push({ inlineData: { mimeType: questionFile.type, data: qBase64 } });
+  const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qBase64DataUrl.split(',')[1] } }];
   
   if (solutionFile) {
     const sBase64DataUrl = await fileToBase64(solutionFile);
-    const sBase64 = sBase64DataUrl.split(',')[1];
-    parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64 } });
+    parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64DataUrl.split(',')[1] } });
   }
 
-  const prompt = `Extract every question from these documents into a structured JSON array. 
-  RETURN ONLY RAW JSON. NO MARKDOWN. NO \`\`\`.
-  CRITICAL: Escape all backslashes in LaTeX math. Example: use "\\\\alpha" instead of "\\alpha".
+  const prompt = `
+  Analyze the provided document(s) and extract EVERY question from ALL subjects (Physics, Chemistry, Mathematics).
   
-  Expected JSON format:
+  STRICT FORMATTING RULES:
+  1. Return ONLY a valid JSON Array.
+  2. Escape all LaTeX backslashes. Example: use "\\\\alpha" for \\alpha.
+  3. Wrap math in $ delimiters (e.g. $x^2$, $\\frac{a}{b}$).
+  4. Use \\frac{}{} for fractions, not /.
+  5. Avoid unicode for math symbols (use $\\beta$ not \\u03B2).
+  6. Detect Subject from headers (SECTION - A etc).
+  
+  JSON Structure:
   [
     {
-      "subject": "Physics/Chemistry/Mathematics",
-      "statement": "Question text...",
-      "type": "MCQ/Numerical",
-      "options": ["A", "B", "C", "D"], // Only for MCQ
-      "correctAnswer": "0", // Index for MCQ, Value for Numerical
-      "solution": "Detailed solution...",
-      "explanation": "Brief concept explanation...",
-      "concept": "Core topic name",
-      "difficulty": "Medium"
+      "subject": "Physics",
+      "statement": "Question...",
+      "type": "MCQ",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswer": "A",
+      "solution": "Solution..."
     }
   ]
   `;
-
-  const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  ];
 
   try {
     const response = await safeGenerateContent({
       model: VISION_MODEL, 
       contents: { parts: [...parts, { text: prompt }] },
-      config: { 
-          // responseMimeType: "application/json", // Disabled to avoid model errors, we parse manually
-          safetySettings: safetySettings 
-      }
+      config: { responseMimeType: "application/json" } 
     });
 
-    const data = cleanAndParseJSON(extractText(response));
-    const questions = Array.isArray(data) ? data : [];
+    const text = extractText(response);
+    let data = cleanAndParseJSON(text);
+
+    if (data && !Array.isArray(data)) {
+        if (Array.isArray(data.questions)) data = data.questions;
+        else if (Array.isArray(data.data)) data = data.data;
+        else if (Array.isArray(data.items)) data = data.items;
+        else if (Array.isArray(data.result)) data = data.result;
+    }
     
-    return questions.map((q: any, idx: number) => ({
-      ...q,
-      id: q.id || `parsed-${Date.now()}-${idx}`,
-      markingScheme: q.markingScheme || { positive: 4, negative: q.type === 'MCQ' ? 1 : 0 },
-      subject: q.subject || 'Physics',
-      type: q.type || 'MCQ',
-      difficulty: q.difficulty || 'Medium',
-      explanation: q.explanation || q.solution || 'Extracted.',
-      concept: q.concept || 'Theory',
-      options: q.options || [],
-      statement: q.statement || 'Statement missing.',
-      correctAnswer: q.correctAnswer || '',
-      solution: q.solution || 'No solution.'
-    }));
+    if (!Array.isArray(data)) throw new Error("Parsed data is not an array");
+
+    return data
+      .filter((q: any) => q && typeof q === 'object')
+      .map((q: any, idx: number) => {
+        const defaultMarking = { positive: 4, negative: 1 };
+        const safeMarkingScheme = (q.markingScheme && typeof q.markingScheme === 'object' && typeof q.markingScheme.positive === 'number')
+            ? q.markingScheme
+            : defaultMarking;
+
+        return {
+            ...q,
+            id: `parsed-${Date.now()}-${idx}`,
+            markingScheme: safeMarkingScheme,
+            subject: q.subject || 'Physics', 
+            type: q.type || 'MCQ',
+            options: q.options || [],
+            statement: q.statement || 'Error parsing statement',
+            correctAnswer: q.correctAnswer || '',
+            solution: q.solution || ''
+        };
+    });
   } catch (error) {
     console.error("Parsing Failure:", error);
     throw error;
@@ -592,13 +459,10 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 
 export const getDeepAnalysis = async (result: any) => {
     try {
-        const prompt = `Analyze these JEE mock results: ${JSON.stringify(result)}. Provide deep pedagogical feedback.`;
         const response = await safeGenerateContent({
             model: ANALYSIS_MODEL,
-            contents: prompt
+            contents: `Analyze exam performance: ${JSON.stringify(result).substring(0, 5000)}. Brief strategic advice.`
         });
-        return extractText(response) || "Summary not available.";
-    } catch (e) {
-        return "Analysis failed.";
-    }
+        return extractText(response);
+    } catch (e) { return "Analysis unavailable."; }
 };

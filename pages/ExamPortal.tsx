@@ -92,13 +92,15 @@ const ExamPortal = () => {
       const isCorrect = normResp !== '' && normResp === normCorrect;
       
       if (normResp !== '') {
-        if (isCorrect) score += q.markingScheme.positive;
-        else score -= q.markingScheme.negative;
+        const positive = q.markingScheme?.positive || 4;
+        const negative = q.markingScheme?.negative || 1;
+        if (isCorrect) score += positive;
+        else score -= negative;
       }
       return { ...q, userAnswer: resp, isCorrect };
     });
     
-    const totalPossible = currentSession.questions.length * 4;
+    const totalPossible = currentSession.questions.reduce((acc: number, q: Question) => acc + (q.markingScheme?.positive || 4), 0);
     const accuracy = Math.round((score / Math.max(1, totalPossible)) * 100);
     const results = {
       id: Date.now().toString(36),
@@ -258,8 +260,8 @@ const ExamPortal = () => {
                 <span className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]">{currentQuestion.subject}</span>
              </div>
              <div className="flex gap-3">
-                <span className="text-green-700 text-[10px] font-black px-4 py-1.5 bg-green-50 rounded-xl border border-green-200">+{currentQuestion.markingScheme.positive}</span>
-                <span className="text-red-700 text-[10px] font-black px-4 py-1.5 bg-red-50 rounded-xl border border-red-200">-{currentQuestion.markingScheme.negative}</span>
+                <span className="text-green-700 text-[10px] font-black px-4 py-1.5 bg-green-50 rounded-xl border border-green-200">+{currentQuestion.markingScheme?.positive || 4}</span>
+                <span className="text-red-700 text-[10px] font-black px-4 py-1.5 bg-red-50 rounded-xl border border-red-200">-{currentQuestion.markingScheme?.negative || 1}</span>
              </div>
           </div>
 
@@ -282,7 +284,9 @@ const ExamPortal = () => {
                           <span className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-xl transition-all ${selected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
                               {selected ? <CheckCircle2 className="w-6 h-6" /> : String.fromCharCode(65 + i)}
                           </span>
-                          <MathText text={opt} className="text-slate-700 font-bold text-lg flex-1" />
+                          <div className="flex-1 min-w-0">
+                             <MathText text={opt} className="text-slate-700 font-bold text-lg" />
+                          </div>
                         </motion.button>
                       );
                     })}

@@ -11,6 +11,7 @@ interface MathTextProps {
  * Robust MathText component that manually parses and renders LaTeX using KaTeX.
  * Supports $...$, $$...$$, \(...\), \[...\].
  * Auto-detects and renders raw LaTeX commands in text (like \frac, \int) even if delimiters are missing.
+ * ALSO auto-detects implicit math symbols like x^2 or H_2O to improve UX for poorly formatted AI output.
  */
 const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false }) => {
   const htmlContent = useMemo(() => {
@@ -48,8 +49,8 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
       
       const parts = sanitizedText.split(delimiterRegex);
       
-      // Regex to detect "naked" LaTeX in text parts
-      const isLatexRegex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`);
+      // Regex to detect "naked" LaTeX or Implicit Math in text parts
+      const isLatexRegex = new RegExp(`(\\\\(${cmdList}))|([a-zA-Z0-9]+[\\^_]\\{?[a-zA-Z0-9]+\\}?)|(\\s*[=+\\-\\/]\\s*)`);
 
       return parts.map((part) => {
         if (!part) return '';
@@ -74,7 +75,6 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
                     globalGroup: true
                 });
             } catch (katexErr) {
-                // Return escaped raw text instead of red error block to keep UI clean
                 return part
                   .replace(/&/g, '&amp;')
                   .replace(/</g, '&lt;')
@@ -82,17 +82,14 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
             }
         }
         
-        // B. If it's a Text part, check for un-delimited LaTeX
+        // B. If it's a Text part, check for un-delimited LaTeX or Implicit Math
         let raw = part;
         
-        // Heuristic: If it contains LaTeX commands but wasn't caught by delimiter regex, it's likely missing delimiters.
-        // We also clean up "orphan" dollars (e.g. "Value is $50" -> keep as is unless latex found. "Equation $ x^2" -> fix).
-        
-        // Check for latex patterns
         if (isLatexRegex.test(raw)) {
-             // It has LaTeX commands. Treat this whole text chunk as math.
-             // Remove ALL orphan/broken delimiters (like single $) that confuse KaTeX or indicate broken generation
-             let cleanRaw = raw.replace(/\$/g, '');
+             let cleanRaw = raw
+                .replace(/\$/g, '')
+                .replace(/(\d+)\s*\*\s*([a-zA-Z])/g, '$1 \\cdot $2')
+                .replace(/([a-zA-Z])\s*\*\s*([a-zA-Z])/g, '$1 \\cdot $2');
              
              try {
                  return katex.renderToString(cleanRaw, { 
@@ -102,7 +99,7 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
                     displayMode: false 
                  });
              } catch (e) {
-                 // If rendering fails, fallback to text
+                 // Fallback
              }
         }
 
@@ -121,7 +118,7 @@ const MathText: React.FC<MathTextProps> = ({ text, className, isBlock = false })
 
   return (
     <div 
-      className={`math-content prose prose-slate max-w-none ${className || ''}`} 
+      className={`math-content prose prose-slate max-w-none break-words overflow-hidden ${className || ''}`} 
       dangerouslySetInnerHTML={{ __html: htmlContent }} 
     />
   );

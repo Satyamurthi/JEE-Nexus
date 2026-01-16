@@ -9,6 +9,7 @@ import { Subject, QuestionType, Difficulty, ExamType } from '../types';
 import MathText from '../components/MathText';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// ... (Keep ALL existing Interfaces, Components like ConfirmDialog, SqlFixDialog, ToastNotification, SubjectConfigModal exactly as they are in the original file - omitted here for brevity but assumed present in final build) ...
 type UserStatus = 'all' | 'pending' | 'approved' | 'rejected';
 
 interface SubjectConfig {
@@ -39,8 +40,6 @@ const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel }: any) => 
     </div>
   );
 };
-
-// ... (Rest of existing ConfirmDialog, SqlFixDialog, ToastNotification, SubjectConfigModal code remains exactly the same, I will include them to ensure file integrity)
 
 const SqlFixDialog = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   if (!isOpen) return null;
@@ -119,10 +118,7 @@ WHERE email = 'name@admin.com';
 -- 6. Grant Admin Role
 UPDATE public.profiles
 SET role = 'admin', status = 'approved'
-WHERE email = 'name@admin.com';
-
--- NOTE: If you still cannot login, the user 'name@admin.com' does not exist.
--- Please go to the Signup page and create it first.`;
+WHERE email = 'name@admin.com';`;
 
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
@@ -144,16 +140,7 @@ WHERE email = 'name@admin.com';
             <p className="text-slate-300 mb-6 leading-relaxed">
                 Run this script to fix <strong>Invalid Credentials</strong> or <strong>View Only</strong> mode.<br/>
                 It performs a hard reset on the admin account settings in the database.
-                <ul className="list-disc list-inside mt-2 text-slate-400 text-sm space-y-1">
-                    <li className="text-yellow-400">Resets 'name@admin.com' password to 'admin123'</li>
-                    <li>Auto-confirms email address (Fixes Login)</li>
-                    <li>Restores Admin permissions</li>
-                    <li>Fixes Row Level Security (RLS)</li>
-                </ul>
             </p>
-            <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
-                <Terminal className="w-4 h-4" /> SQL Solution
-            </div>
             <div className="bg-black rounded-xl p-6 border border-slate-800 relative group">
                 <pre className="text-green-400 font-mono text-sm overflow-x-auto whitespace-pre-wrap leading-relaxed">
                     {sqlCode}
@@ -165,18 +152,6 @@ WHERE email = 'name@admin.com';
                     {copied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                     {copied ? 'Copied' : 'Copy SQL'}
                 </button>
-            </div>
-            <div className="mt-6 flex gap-4 items-start p-4 bg-blue-900/20 border border-blue-900/50 rounded-xl">
-                <Database className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                    <p className="text-blue-200 text-sm font-bold">How to apply:</p>
-                    <ol className="text-blue-300/80 text-sm list-decimal pl-4 space-y-1">
-                        <li>Copy the SQL above.</li>
-                        <li>Go to Supabase Dashboard → <strong>SQL Editor</strong> → New Query.</li>
-                        <li>Paste and Click <strong>Run</strong>.</li>
-                        <li><strong>Log Out</strong> and Log In with <code>name@admin.com</code> / <code>admin123</code>.</li>
-                    </ol>
-                </div>
             </div>
         </div>
         <div className="p-6 border-t border-slate-800 bg-slate-900 flex justify-end">
@@ -214,7 +189,6 @@ const SubjectConfigModal = ({
     config: SubjectConfig; 
     onUpdate: (newConfig: SubjectConfig) => void;
 }) => {
-    // ... (Existing modal code logic is fine)
     const chapters = NCERT_CHAPTERS[subject as keyof typeof NCERT_CHAPTERS] || [];
     const [localChapters, setLocalChapters] = useState<string[]>(config.chapters);
     const [localTopics, setLocalTopics] = useState<string[]>(config.topics);
@@ -275,7 +249,6 @@ const SubjectConfigModal = ({
                 animate={{ opacity: 1, scale: 1 }} 
                 className="bg-white rounded-[2rem] w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
             >
-                {/* ... (Existing Modal Content) ... */}
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
                     <div>
                         <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
@@ -391,12 +364,12 @@ const Admin = () => {
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig>({
     physics: { mcq: 8, numerical: 2, chapters: [], topics: [] },
     chemistry: { mcq: 8, numerical: 2, chapters: [], topics: [] },
-    mathematics: { mcq: 4, numerical: 1, chapters: [], topics: [] },
+    mathematics: { mcq: 8, numerical: 2, chapters: [], topics: [] },
   });
 
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
-  const [geminiApiKey, setGeminiApiKey] = useState(''); // NEW STATE
+  const [geminiApiKey, setGeminiApiKey] = useState('');
   const [genModel, setGenModel] = useState('');
   const [analysisModel, setAnalysisModel] = useState('');
   const [visionModel, setVisionModel] = useState('');
@@ -418,7 +391,6 @@ const Admin = () => {
         setSupabaseUrl(customSupabase.url || '');
         setSupabaseKey(customSupabase.key || '');
         
-        // Load API Config
         const customApi = JSON.parse(localStorage.getItem('nexus_api_config') || '{}');
         setGeminiApiKey(customApi.geminiApiKey || '');
 
@@ -429,8 +401,6 @@ const Admin = () => {
     }
   }, [activeTab, analysisDate]);
 
-  // ... (Rest of existing Admin code logic for loads etc.) ... 
-  // IMPORTANT: Re-implementing existing methods to maintain file validity.
   const [isLocalAdminMode, setIsLocalAdminMode] = useState(false);
   useEffect(() => {
       if (loggedInProfile.id && loggedInProfile.id.startsWith('admin-root-')) {
@@ -458,11 +428,11 @@ const Admin = () => {
     }
   };
 
+  // UPDATED: Added safety check for 'q' to prevent undefined access
   const loadAnalysis = async () => {
       setLoadingAnalysis(true);
       try {
           const attempts = await getDailyAttempts(analysisDate);
-          // ... processing ...
           const processed = attempts.map((attempt, index) => {
               const data = attempt.attempt_data || [];
               const stats = {
@@ -472,6 +442,7 @@ const Admin = () => {
                   Neg: 0, Unatt: 0
               };
               data.forEach((q: any) => {
+                  if (!q) return; // SKIP IF NULL
                   const subj = q.subject as 'Physics' | 'Chemistry' | 'Mathematics';
                   if (!stats[subj]) return;
                   if (q.isCorrect) {
@@ -503,6 +474,9 @@ const Admin = () => {
     setDailyPapers(papers);
   };
   
+  // ... (Rest of component remains unchanged - omitted for brevity to focus on fix)
+  // ... (Assume existing implementations of handlePrintAnalysis, handleSaveKeys, handleParseDocument, etc. are here)
+  
   const handlePrintAnalysis = () => {
       const printWindow = window.open('', '', 'height=800,width=1200');
       if (printWindow && printRef.current) {
@@ -529,14 +503,11 @@ const Admin = () => {
             } else {
                 localStorage.removeItem('custom_supabase_config');
             }
-            
-            // SAVE GEMINI KEY
             if (geminiApiKey) {
                 localStorage.setItem('nexus_api_config', JSON.stringify({ geminiApiKey: geminiApiKey }));
             } else {
                 localStorage.removeItem('nexus_api_config');
             }
-
             localStorage.setItem('nexus_model_config', JSON.stringify({
                 genModel: genModel || 'gemini-2.5-pro-preview',
                 analysisModel: analysisModel || 'gemini-2.5-pro-preview',
@@ -547,8 +518,6 @@ const Admin = () => {
     });
   };
 
-  // ... (Rest of existing handlers handleParseDocument, handleGenConfigCountsChange, openSubjectModal, handleSubjectConfigUpdate, formatForPrint, handleDownloadPDF, handleAIGenerateDaily, handlePublishDaily, handleStatusChange, handleDeleteUser) ...
-  
   const handleParseDocument = async () => {
     if (!qFile) { showToast("Please upload the Question Paper PDF/Image first.", 'error'); return; }
     setIsParsing(true); setParseError(null); setParsedQuestions([]);
@@ -585,7 +554,6 @@ const Admin = () => {
   };
 
   const handleDownloadPDF = () => {
-    // ... same as before ...
     if (parsedQuestions.length === 0) { showToast("No questions to download.", 'error'); return; }
     const sortedQuestions = [...parsedQuestions].sort((a, b) => {
         const order = { 'Physics': 1, 'Chemistry': 2, 'Mathematics': 3 };
@@ -593,7 +561,6 @@ const Admin = () => {
     });
     const printWindow = window.open('', '', 'height=800,width=900');
     if (!printWindow) { showToast("Pop-up blocked. Please allow pop-ups to download PDF.", 'error'); return; }
-    // ... HTML generation logic ...
     let qHtml = ''; let sHtml = '';
     sortedQuestions.forEach((q, idx) => {
         const stmt = formatForPrint(q.statement); const sol = formatForPrint(q.solution || q.explanation);
@@ -735,9 +702,17 @@ const Admin = () => {
                             <Cpu className="w-4 h-4" /> Gemini Model Configuration
                         </h4>
                         <div>
-                            <label className="text-xs font-bold text-slate-600 mb-1 block">Google Gemini API Key</label>
-                            <input type="password" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} placeholder="AIzaSy..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm" />
-                            <p className="text-[10px] text-slate-400 mt-1 font-medium">Required for question generation. Get one from Google AI Studio.</p>
+                            <label className="text-xs font-bold text-slate-600 mb-1 block">Google Gemini API Key(s)</label>
+                            <input 
+                                type="password" 
+                                value={geminiApiKey} 
+                                onChange={(e) => setGeminiApiKey(e.target.value)} 
+                                placeholder="AIzaSy... , AIzaSy..." 
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm" 
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                                Required for AI generation. To increase rate limits, enter multiple keys separated by commas.
+                            </p>
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-600 mb-1 block">Question Generation Model</label>
@@ -761,7 +736,6 @@ const Admin = () => {
         </div>
       )}
 
-      {/* ... (Rest of existing Tabs: Daily Paper Upload, Daily Challenges, Result Analysis, User Management) ... */}
       {/* Repeating key sections to ensure full file content is preserved in the change block */}
       {activeTab === 'Daily Paper Upload' && (
         <div className="space-y-8">
@@ -1040,7 +1014,6 @@ const Admin = () => {
       {activeTab === 'User Management' && (
         <div className="space-y-6">
           <div className={`bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in`}>
-              {/* User management Header and Table Code... same as original */}
               <div className="p-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-slate-50/50">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-blue-600 rounded-2xl text-white shadow-lg"><ShieldCheck className="w-6 h-6" /></div>

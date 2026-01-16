@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
 import { LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
@@ -19,7 +19,7 @@ const Login = React.lazy(() => import('./pages/Login'));
 const Signup = React.lazy(() => import('./pages/Signup'));
 
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
