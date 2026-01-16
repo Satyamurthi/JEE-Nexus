@@ -139,9 +139,24 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000
 
         if (retries > 0) {
             if (isRateLimit) {
-                await delay(initialDelay);
-                return safeGenerateContent(params, retries - 1, initialDelay * 1.5, keyOffset + 1);
+                // Improved Rate Limit Handling: Parse Retry-After or use exponential backoff
+                let waitTime = initialDelay;
+                const match = e.message?.match(/retry in ([0-9.]+)s/);
+                
+                if (match && match[1]) {
+                    // If API explicitly says "retry in X seconds", use that + 2s buffer
+                    waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 2000;
+                } else {
+                    // Otherwise, force a significant delay (minimum 10s for 429)
+                    waitTime = Math.max(initialDelay * 2, 10000);
+                }
+                
+                console.log(`[Rate Limit] Retrying in ${Math.round(waitTime/1000)}s...`);
+                await delay(waitTime);
+                // Rotate key if possible and retry
+                return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
             }
+            
             if (isServerOverload) {
                 await delay(initialDelay * 2);
                 return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset);
@@ -299,7 +314,8 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
   if (topics && topics.length > 0) topicFocus += ` | Topics: ${topics.join(', ')}`;
 
   const allQuestions: Question[] = [];
-  const BATCH_SIZE = 5; // Reduced to 5 to prevent token overflow/truncation
+  // Reduced Batch Size to 3 to prevent TPM limits and reduce probability of 429
+  const BATCH_SIZE = 3; 
 
   let mcqNeeded = totalMcqTarget;
   let numNeeded = totalNumTarget;
@@ -313,7 +329,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
       // Fill batch with available needs, maxing out at BATCH_SIZE
       if (mcqNeeded > 0 && numNeeded > 0) {
-          currentMcq = Math.min(mcqNeeded, 3); // Prioritize a mix
+          currentMcq = Math.min(mcqNeeded, 2); // Split evenly if possible
           currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
           // If space remains and we need more MCQs, take them
           if (currentMcq + currentNum < BATCH_SIZE && mcqNeeded > currentMcq) {
@@ -333,7 +349,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           if (batch.length === 0) {
               console.warn("Empty batch returned. Retrying...");
               failSafe++;
-              await delay(1000);
+              await delay(2000);
               continue;
           }
 
@@ -355,7 +371,8 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           failSafe++;
       }
       
-      await delay(1200); // Rate limit protection
+      // Increased inter-batch delay to 4s to stay within safe RPM (Request Per Minute) limits
+      await delay(4000); 
   }
 
   // Final sanity trim (in case we overshot slightly)
@@ -368,9 +385,10 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    await delay(1000);
+    // Increased delay between subjects to 5s to allow token bucket to refill
+    await delay(5000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(1000);
+    await delay(5000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
     return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
