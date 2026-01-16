@@ -428,7 +428,6 @@ const Admin = () => {
     }
   };
 
-  // UPDATED: Added safety check for 'q' to prevent undefined access
   const loadAnalysis = async () => {
       setLoadingAnalysis(true);
       try {
@@ -442,7 +441,7 @@ const Admin = () => {
                   Neg: 0, Unatt: 0
               };
               data.forEach((q: any) => {
-                  if (!q) return; // SKIP IF NULL
+                  if (!q) return; 
                   const subj = q.subject as 'Physics' | 'Chemistry' | 'Mathematics';
                   if (!stats[subj]) return;
                   if (q.isCorrect) {
@@ -473,9 +472,6 @@ const Admin = () => {
     const papers = await getAllDailyChallenges();
     setDailyPapers(papers);
   };
-  
-  // ... (Rest of component remains unchanged - omitted for brevity to focus on fix)
-  // ... (Assume existing implementations of handlePrintAnalysis, handleSaveKeys, handleParseDocument, etc. are here)
   
   const handlePrintAnalysis = () => {
       const printWindow = window.open('', '', 'height=800,width=1200');
@@ -541,16 +537,24 @@ const Admin = () => {
       setGenerationConfig(prev => ({ ...prev, [activeConfigSubject.toLowerCase()]: newConfig }));
   };
 
-  const formatForPrint = (str: string) => {
-    if (!str) return '';
-    let raw = str.replace(/\\\\/g, '\\').replace(/\\\\\$/g, '$').replace(/\\\$/g, '$');
-    const hasPairedDelimiters = /(\$\$[\s\S]*?\$\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))|(\$[^\$]+\$)/.test(raw);
-    if (!hasPairedDelimiters) {
-        const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
-        const isLatex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`).test(raw) || raw.startsWith('\\');
-        if (isLatex) { return `$${raw.replace(/\$/g, '')}$`; }
-    }
-    return raw;
+  const processTextForHtml = (text: string) => {
+    if (!text) return '';
+    // Unescape dollars just like MathText to fix \$ issues
+    let clean = text.replace(/\\\\/g, '\\').replace(/\\\\\$/g, '$').replace(/\\\$/g, '$');
+    
+    // Split by delimiters to separate Math from Text
+    const regex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\\([\s\S]*?\\\))|(?:\$[\s\S]*?\$))/g;
+    const parts = clean.split(regex);
+    
+    return parts.map(part => {
+        if (!part) return '';
+        // If part is a delimiter block, return as is (KaTeX will handle it)
+        if (part.match(/^(\$\$|\\\[|\\\(|\$)/)) {
+            return part;
+        }
+        // Text part: Replace newlines with <br/> to format solution steps properly
+        return part.replace(/\n/g, '<br/>');
+    }).join('');
   };
 
   const handleDownloadPDF = () => {
@@ -563,9 +567,12 @@ const Admin = () => {
     if (!printWindow) { showToast("Pop-up blocked. Please allow pop-ups to download PDF.", 'error'); return; }
     let qHtml = ''; let sHtml = '';
     sortedQuestions.forEach((q, idx) => {
-        const stmt = formatForPrint(q.statement); const sol = formatForPrint(q.solution || q.explanation);
-        qHtml += `<div class="question-block"><div class="q-header"><span class="q-num">Q${idx + 1}.</span><span class="q-meta">${q.subject} (${q.type})</span></div><div class="q-statement">${stmt.replace(/\n/g, '<br/>')}</div>${q.type === 'MCQ' && q.options ? `<div class="q-options">${q.options.map((opt: string, i: number) => `<div class="q-option"><span class="opt-label">${String.fromCharCode(65 + i)})</span><span class="opt-text">${formatForPrint(opt)}</span></div>`).join('')}</div>` : ''}</div>`;
-        sHtml += `<div class="solution-block"><div class="s-header"><strong>Q${idx + 1}.</strong> <span class="correct-ans">Correct Answer: ${formatForPrint(String(q.correctAnswer))}</span></div><div class="s-concept"><strong>Concept:</strong> ${q.concept}</div><div class="s-body"><strong>Explanation:</strong><br/>${sol.replace(/\n/g, '<br/>')}</div></div>`;
+        // Use smart processing instead of simple format
+        const stmt = processTextForHtml(q.statement); 
+        const sol = processTextForHtml(q.solution || q.explanation);
+        
+        qHtml += `<div class="question-block"><div class="q-header"><span class="q-num">Q${idx + 1}.</span><span class="q-meta">${q.subject} (${q.type})</span></div><div class="q-statement">${stmt}</div>${q.type === 'MCQ' && q.options ? `<div class="q-options">${q.options.map((opt: string, i: number) => `<div class="q-option"><span class="opt-label">${String.fromCharCode(65 + i)})</span><span class="opt-text">${processTextForHtml(opt)}</span></div>`).join('')}</div>` : ''}</div>`;
+        sHtml += `<div class="solution-block"><div class="s-header"><strong>Q${idx + 1}.</strong> <span class="correct-ans">Correct Answer: ${processTextForHtml(String(q.correctAnswer))}</span></div><div class="s-concept"><strong>Concept:</strong> ${q.concept}</div><div class="s-body"><strong>Explanation:</strong><br/>${sol}</div></div>`;
     });
     const fullHtml = `<!DOCTYPE html><html><head><title>JEE Nexus Paper - ${uploadDate}</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script><style>body { font-family: 'Times New Roman', serif; padding: 40px; max-width: 900px; mx-auto; } h1, h2, h3 { text-align: center; } .section-break { page-break-before: always; border-top: 2px dashed #ccc; margin-top: 40px; padding-top: 40px; } .question-block, .solution-block { margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 20px; } .q-header, .s-header { margin-bottom: 8px; font-weight: bold; } .q-meta { font-size: 0.8em; color: #666; margin-left: 10px; text-transform: uppercase; } .q-statement { margin-bottom: 12px; font-size: 1.1em; line-height: 1.5; } .q-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; } .q-option { display: flex; gap: 8px; } .opt-label { font-weight: bold; } .correct-ans { color: #008000; margin-left: 10px; } .s-concept { font-style: italic; color: #444; margin-bottom: 5px; font-size: 0.9em; } .s-body { background: #f9f9f9; padding: 10px; border-radius: 5px; font-size: 0.95em; line-height: 1.4; } @media print { body { padding: 0; } .no-print { display: none; } }</style></head><body><h1>JEE Nexus AI - Daily Practice Paper</h1><h3>Date: ${uploadDate} | Total Questions: ${sortedQuestions.length}</h3><hr/><h2>Part A: Question Paper</h2><div id="questions">${qHtml}</div><div class="section-break"><h2>Part B: Answer Key & Solutions</h2><div id="solutions">${sHtml}</div></div><script>document.addEventListener("DOMContentLoaded", function() { renderMathInElement(document.body, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError : false, trust: true }); setTimeout(() => { window.print(); }, 1000); });</script></body></html>`;
     printWindow.document.write(fullHtml); printWindow.document.close();

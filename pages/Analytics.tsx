@@ -76,6 +76,26 @@ const Analytics = () => {
     }
   };
 
+  const processTextForHtml = (text: string) => {
+    if (!text) return '';
+    // Unescape dollars just like MathText to fix \$ issues
+    let clean = text.replace(/\\\\/g, '\\').replace(/\\\\\$/g, '$').replace(/\\\$/g, '$');
+    
+    // Split by delimiters to separate Math from Text
+    const regex = /((?:\$\$[\s\S]*?\$\$)|(?:\\\[[\s\S]*?\\\])|(?:\\\([\s\S]*?\\\))|(?:\$[\s\S]*?\$))/g;
+    const parts = clean.split(regex);
+    
+    return parts.map(part => {
+        if (!part) return '';
+        // If part is a delimiter block, return as is (KaTeX will handle it)
+        if (part.match(/^(\$\$|\\\[|\\\(|\$)/)) {
+            return part;
+        }
+        // Text part: Replace newlines with <br/> to format solution steps properly
+        return part.replace(/\n/g, '<br/>');
+    }).join('');
+  };
+
   const handleDownloadReport = () => {
     if (!result) return;
 
@@ -97,28 +117,6 @@ const Analytics = () => {
         return (order[a.subject as keyof typeof order] || 4) - (order[b.subject as keyof typeof order] || 4);
     });
 
-    // Helper to detect raw latex for the report (Must match MathText logic)
-    const formatForPrint = (str: string) => {
-        if (!str) return '';
-        // CRITICAL: Unescape \$ to $ so KaTeX can find the delimiters
-        let raw = str.replace(/\\\\/g, '\\').replace(/\\\\\$/g, '$').replace(/\\\$/g, '$');
-        
-        // Regex to check for PAIRS of delimiters. If no pairs, we might need to fix.
-        const hasPairedDelimiters = /(\$\$[\s\S]*?\$\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))|(\$[^\$]+\$)/.test(raw);
-        
-        if (!hasPairedDelimiters) {
-            // Remove orphan dollars
-            let clean = raw.replace(/\$/g, '');
-
-            // Comprehensive Regex matching MathText.tsx
-            const cmdList = "frac|sqrt|sum|int|vec|hat|bar|pm|infty|partial|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|Delta|Gamma|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|nabla|times|cdot|approx|leq|geq|ne|equiv|ll|gg|propto|rightarrow|leftarrow|leftrightarrow|to|mapsto|infty|deg|angle|triangle|text|mathbf|mathcal|mathrm|sin|cos|tan|cot|csc|sec|log|ln|exp|circ";
-            const isLatex = new RegExp(`\\\\(${cmdList})|[\\^_]\{`).test(clean) || clean.startsWith('\\');
-            
-            if (isLatex) return `$${clean}$`;
-        }
-        return raw;
-    };
-
     sortedQuestions.forEach((q: any, idx: number) => {
         const isCorrect = q.isCorrect;
         const isSkipped = q.userAnswer === undefined || q.userAnswer === '';
@@ -132,8 +130,8 @@ const Analytics = () => {
 
         const isMCQ = q.type === 'MCQ' || (q.options && q.options.length > 0);
 
-        const displayStatement = formatForPrint(q.statement);
-        const displaySolution = formatForPrint(q.solution || q.explanation);
+        const displayStatement = processTextForHtml(q.statement);
+        const displaySolution = processTextForHtml(q.solution || q.explanation);
 
         let optionsHtml = '';
         if (isMCQ && q.options) {
@@ -150,7 +148,7 @@ const Analytics = () => {
                     if (isUserSel && !isCorrectSel) optClass += ' opt-wrong';
                     if (isUserSel && isCorrectSel) optClass += ' opt-user-correct';
 
-                    const displayOpt = formatForPrint(opt);
+                    const displayOpt = processTextForHtml(opt);
 
                     return `<div class="${optClass}">
                         <span class="opt-label">${String.fromCharCode(65 + i)})</span> ${displayOpt}
