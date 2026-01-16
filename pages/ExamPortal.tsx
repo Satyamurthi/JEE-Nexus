@@ -23,7 +23,7 @@ const AnimatedTimer = ({ timeLeft, durationMinutes }: { timeLeft: number, durati
   const isCritical = timeLeft < 300; 
 
   return (
-    <div className="relative w-24 h-24 flex items-center justify-center">
+    <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
       <svg className="absolute w-full h-full transform -rotate-90" viewBox="0 0 80 80">
         <circle className="text-slate-100" stroke="currentColor" strokeWidth="6" fill="transparent" r={RADIUS} cx="40" cy="40" />
         <motion.circle
@@ -35,7 +35,7 @@ const AnimatedTimer = ({ timeLeft, durationMinutes }: { timeLeft: number, durati
         />
       </svg>
       <div className="relative flex flex-col items-center">
-        <span className={`font-mono text-xl font-black tracking-tight ${isCritical ? 'text-red-600' : 'text-slate-900'}`}>{formatTime(timeLeft)}</span>
+        <span className={`font-mono text-lg sm:text-xl font-black tracking-tight ${isCritical ? 'text-red-600' : 'text-slate-900'}`}>{formatTime(timeLeft)}</span>
         <span className={`text-[8px] font-black uppercase tracking-widest ${isCritical ? 'text-red-400' : 'text-slate-400'}`}>Remaining</span>
       </div>
     </div>
@@ -233,19 +233,19 @@ const ExamPortal = () => {
 
   return (
     <div className="fixed inset-0 bg-[#f8fafc] flex flex-col font-sans overflow-hidden">
-      <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-8 shrink-0 z-50 shadow-sm">
-        <div className="flex items-center gap-6">
-          <div className="bg-slate-900 p-2.5 rounded-2xl text-white shadow-xl"><Monitor className="w-6 h-6" /></div>
-          <div>
+      <header className="h-16 sm:h-20 bg-white border-b border-slate-100 flex items-center justify-between px-4 sm:px-8 shrink-0 z-50 shadow-sm">
+        <div className="flex items-center gap-4 sm:gap-6">
+          <div className="bg-slate-900 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl text-white shadow-xl"><Monitor className="w-5 h-5 sm:w-6 sm:h-6" /></div>
+          <div className="hidden sm:block">
             <h1 className="text-xl font-black text-slate-900 uppercase">JEE Simulator</h1>
             <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Intelligence Layer v4
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-4 sm:gap-8">
           <AnimatedTimer timeLeft={timeLeft} durationMinutes={session.durationMinutes} />
-          <button onClick={() => setPaletteOpen(!paletteOpen)} className="lg:hidden p-3 bg-slate-50 border border-slate-100 rounded-2xl"><LayoutGrid className="w-6 h-6" /></button>
+          <button onClick={() => setPaletteOpen(!paletteOpen)} className="lg:hidden p-3 bg-slate-50 border border-slate-100 rounded-2xl"><LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6" /></button>
           <motion.button whileTap={{ scale: 0.95 }} onClick={() => { if(confirm("Finish exam?")) handleSubmitButton() }} disabled={isSubmitting} className="hidden sm:flex px-8 py-3.5 bg-red-600 text-white rounded-2xl font-black text-sm hover:bg-red-700 transition-all shadow-xl items-center gap-2 disabled:opacity-50">
             {isSubmitting ? "Submitting..." : "Submit Exam"}
           </motion.button>
@@ -254,63 +254,65 @@ const ExamPortal = () => {
 
       <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 flex flex-col bg-white overflow-hidden w-full relative">
-          <div className="px-10 py-5 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
-             <div className="flex items-center gap-5">
-                <span className="bg-slate-900 text-white px-5 py-2 rounded-xl text-sm font-black shadow-lg">Question {currentIdx + 1}</span>
+          <div className="px-4 sm:px-10 py-4 sm:py-5 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+             <div className="flex items-center gap-3 sm:gap-5">
+                <span className="bg-slate-900 text-white px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-black shadow-lg">Question {currentIdx + 1}</span>
                 <span className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]">{currentQuestion.subject}</span>
              </div>
-             <div className="flex gap-3">
-                <span className="text-green-700 text-[10px] font-black px-4 py-1.5 bg-green-50 rounded-xl border border-green-200">+{currentQuestion.markingScheme?.positive || 4}</span>
-                <span className="text-red-700 text-[10px] font-black px-4 py-1.5 bg-red-50 rounded-xl border border-red-200">-{currentQuestion.markingScheme?.negative || 1}</span>
+             <div className="flex gap-2 sm:gap-3">
+                <span className="text-green-700 text-[10px] font-black px-3 sm:px-4 py-1.5 bg-green-50 rounded-xl border border-green-200">+{currentQuestion.markingScheme?.positive || 4}</span>
+                <span className="text-red-700 text-[10px] font-black px-3 sm:px-4 py-1.5 bg-red-50 rounded-xl border border-red-200">-{currentQuestion.markingScheme?.negative || 1}</span>
              </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-10 lg:p-20 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-10 lg:p-20 custom-scrollbar">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div key={currentIdx} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }} className="max-w-4xl mx-auto">
-                <div className="mb-16">
+                <div className="mb-8 sm:mb-16">
                   <div className="flex justify-between items-start">
-                    <MathText text={currentQuestion.statement} className="text-xl sm:text-2xl lg:text-3xl leading-[1.6] text-slate-800 font-medium border-l-8 border-blue-600 pl-10 flex-1" />
+                    <MathText text={currentQuestion.statement} className="text-lg sm:text-2xl lg:text-3xl leading-[1.6] text-slate-800 font-medium border-l-4 sm:border-l-8 border-blue-600 pl-4 sm:pl-10 flex-1" />
                   </div>
                 </div>
 
                 {isOptionsQuestion ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     {currentQuestion.options?.map((opt, i) => {
                       const selected = isOptionSelected(i);
                       return (
                         <motion.button key={i} whileHover={{ y: -4 }} onClick={() => handleOptionClick(i)}
-                          className={`group flex items-center gap-8 p-8 rounded-[2rem] border-2 transition-all text-left ${selected ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-300 bg-white'}`}>
-                          <span className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-xl transition-all ${selected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
-                              {selected ? <CheckCircle2 className="w-6 h-6" /> : String.fromCharCode(65 + i)}
+                          className={`group flex items-center gap-4 sm:gap-8 p-4 sm:p-8 rounded-[1.5rem] sm:rounded-[2rem] border-2 transition-all text-left ${selected ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-slate-300 bg-white'}`}>
+                          <span className={`w-8 h-8 sm:w-12 sm:h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-base sm:text-xl transition-all ${selected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              {selected ? <CheckCircle2 className="w-4 h-4 sm:w-6 sm:h-6" /> : String.fromCharCode(65 + i)}
                           </span>
                           <div className="flex-1 min-w-0">
-                             <MathText text={opt} className="text-slate-700 font-bold text-lg" />
+                             <MathText text={opt} className="text-slate-700 font-bold text-base sm:text-lg" />
                           </div>
                         </motion.button>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="max-w-xl bg-slate-900 p-12 rounded-[3rem] border-4 border-slate-800 mx-auto lg:mx-0 shadow-2xl relative">
-                    <label className="block text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-6">Numerical Value Output</label>
-                    <input type="text" inputMode="decimal" value={responses[currentIdx] || ''} onChange={(e) => { if (/^-?\d*\.?\d*$/.test(e.target.value)) setResponses({...responses, [currentIdx]: e.target.value}); }} placeholder="0.00" className="w-full py-8 text-6xl font-black bg-transparent border-b-4 border-slate-700 outline-none focus:border-blue-500 text-blue-100 text-center placeholder:text-slate-800" />
+                  <div className="max-w-xl bg-slate-900 p-8 sm:p-12 rounded-[2rem] sm:rounded-[3rem] border-4 border-slate-800 mx-auto lg:mx-0 shadow-2xl relative">
+                    <label className="block text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-4 sm:mb-6">Numerical Value Output</label>
+                    <input type="text" inputMode="decimal" value={responses[currentIdx] || ''} onChange={(e) => { if (/^-?\d*\.?\d*$/.test(e.target.value)) setResponses({...responses, [currentIdx]: e.target.value}); }} placeholder="0.00" className="w-full py-4 sm:py-8 text-4xl sm:text-6xl font-black bg-transparent border-b-4 border-slate-700 outline-none focus:border-blue-500 text-blue-100 text-center placeholder:text-slate-800" />
                   </div>
                 )}
               </motion.div>
             </AnimatePresence>
           </div>
 
-          <footer className="h-28 bg-white border-t border-slate-100 px-12 flex items-center justify-between shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.02)]">
-            <div className="flex gap-4">
-              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const s = new Set(markedForReview); const id = currentIdx.toString(); s.has(id) ? s.delete(id) : s.add(id); setMarkedForReview(s); }} className={`px-8 py-4 rounded-2xl font-black transition-all flex items-center gap-3 border-2 ${markedForReview.has(currentIdx.toString()) ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-slate-700 border-slate-100'}`}>
-                <HelpCircle className="w-5 h-5" /> Mark for Review
+          <footer className="h-auto py-3 sm:py-0 sm:h-28 bg-white border-t border-slate-100 px-4 sm:px-12 flex items-center justify-between shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.02)]">
+            <div className="flex gap-2 sm:gap-4">
+              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const s = new Set(markedForReview); const id = currentIdx.toString(); s.has(id) ? s.delete(id) : s.add(id); setMarkedForReview(s); }} className={`px-4 sm:px-8 py-3 sm:py-4 rounded-2xl font-black transition-all flex items-center gap-2 sm:gap-3 border-2 ${markedForReview.has(currentIdx.toString()) ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-slate-700 border-slate-100'}`}>
+                <HelpCircle className="w-5 h-5" /> <span className="hidden sm:inline">Mark for Review</span>
               </motion.button>
-              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const r = {...responses}; delete r[currentIdx]; setResponses(r); }} className="px-8 py-4 rounded-2xl font-black text-slate-400 bg-white border border-slate-100 hover:text-red-500 hover:bg-red-50 flex items-center gap-3"><RotateCcw className="w-5 h-5" /> Clear</motion.button>
+              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const r = {...responses}; delete r[currentIdx]; setResponses(r); }} className="px-4 sm:px-8 py-3 sm:py-4 rounded-2xl font-black text-slate-400 bg-white border border-slate-100 hover:text-red-500 hover:bg-red-50 flex items-center gap-2 sm:gap-3"><RotateCcw className="w-5 h-5" /> <span className="hidden sm:inline">Clear</span></motion.button>
             </div>
-            <div className="flex gap-6">
-              <motion.button whileTap={{ scale: 0.9 }} disabled={currentIdx === 0} onClick={() => setCurrentIdx(prev => prev - 1)} className="w-20 h-16 rounded-2xl border-2 border-slate-100 text-slate-300 hover:text-slate-900 disabled:opacity-10 flex items-center justify-center"><ChevronLeft className="w-8 h-8" /></motion.button>
-              <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if (currentIdx < session.questions.length - 1) { setCurrentIdx(prev => prev + 1); setVisited(prev => new Set([...prev, (currentIdx + 1).toString()])); } else { if(confirm("End of paper?")) handleSubmitButton(); } }} className="px-16 py-4 bg-slate-900 text-white rounded-2xl font-black text-lg flex items-center gap-4 hover:bg-slate-800 shadow-2xl">Save & Next <ChevronRight className="w-5 h-5" /></motion.button>
+            <div className="flex gap-3 sm:gap-6">
+              <motion.button whileTap={{ scale: 0.9 }} disabled={currentIdx === 0} onClick={() => setCurrentIdx(prev => prev - 1)} className="w-14 h-12 sm:w-20 sm:h-16 rounded-2xl border-2 border-slate-100 text-slate-300 hover:text-slate-900 disabled:opacity-10 flex items-center justify-center"><ChevronLeft className="w-6 h-6 sm:w-8 sm:h-8" /></motion.button>
+              <motion.button whileTap={{ scale: 0.98 }} onClick={() => { if (currentIdx < session.questions.length - 1) { setCurrentIdx(prev => prev + 1); setVisited(prev => new Set([...prev, (currentIdx + 1).toString()])); } else { if(confirm("End of paper?")) handleSubmitButton(); } }} className="px-6 sm:px-16 py-3 sm:py-4 bg-slate-900 text-white rounded-2xl font-black text-base sm:text-lg flex items-center gap-2 sm:gap-4 hover:bg-slate-800 shadow-2xl">
+                  <span className="hidden sm:inline">Save & Next</span><span className="sm:hidden">Next</span> <ChevronRight className="w-5 h-5" />
+              </motion.button>
             </div>
           </footer>
         </div>

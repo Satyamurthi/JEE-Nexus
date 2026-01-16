@@ -27,7 +27,7 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -353,7 +353,7 @@ const AppContent = () => {
               />
               <div className="flex-1 flex flex-col min-w-0">
                 <Header toggleSidebar={() => setSidebarOpen(true)} />
-                <main className="flex-1 lg:ml-[280px] p-6 sm:p-10 transition-all overflow-x-hidden pt-4">
+                <main className="flex-1 lg:ml-[280px] p-4 sm:p-6 lg:p-10 transition-all overflow-x-hidden pt-4">
                   <AnimatePresence mode="wait" initial={false}>
                     <motion.div
                       key={location.pathname}

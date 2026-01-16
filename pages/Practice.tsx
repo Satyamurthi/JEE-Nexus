@@ -209,7 +209,7 @@ const Practice = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-[600px]">
         <div className="lg:col-span-4 shrink-0">
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-premium h-full flex flex-col">
+            <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-premium h-full flex flex-col">
                 <div className="flex items-center gap-3 mb-8">
                     <Sliders className="w-5 h-5 text-slate-400" />
                     <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">Configuration</h3>
@@ -285,7 +285,7 @@ const Practice = () => {
         </div>
 
         <div className="lg:col-span-8 flex flex-col gap-8">
-            <div className={`flex-1 bg-${currentColor}-50/50 p-10 rounded-[3rem] border border-${currentColor}-100/50 shadow-sm relative overflow-hidden flex flex-col`}>
+            <div className={`flex-1 bg-${currentColor}-50/50 p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-${currentColor}-100/50 shadow-sm relative overflow-hidden flex flex-col`}>
                 <div className="absolute top-0 right-0 p-10 opacity-10 pointer-events-none"><Layers className={`w-64 h-64 text-${currentColor}-900`} /></div>
                 <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">4. Select Target Chapter(s)</h2>
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 relative z-10 space-y-3 max-h-[500px]">
@@ -299,7 +299,7 @@ const Practice = () => {
                                     <div className={`w-6 h-6 rounded-md flex items-center justify-center border-2 transition-colors ${isSelected ? `bg-${currentColor}-500 border-${currentColor}-500` : 'border-slate-300 bg-white'}`}>
                                       {isSelected && <CheckCircle2 className="w-4 h-4 text-white" />}
                                     </div>
-                                    <span className={`text-lg font-bold ${isSelected ? 'text-slate-900' : 'text-slate-600'}`}>{chap.name}</span>
+                                    <span className={`text-base sm:text-lg font-bold ${isSelected ? 'text-slate-900' : 'text-slate-600'}`}>{chap.name}</span>
                                 </div>
                             </motion.button>
                         );
@@ -310,7 +310,7 @@ const Practice = () => {
             <AnimatePresence>
             {selectedChapters.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                    className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-premium">
+                    className="bg-white p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-premium">
                     <h2 className="text-2xl font-black text-slate-900 mb-6 relative z-10">5. Select Target Topic(s)</h2>
                     <div className="space-y-6">
                         <div className="flex flex-wrap gap-3 border-b border-slate-100 pb-6">
@@ -351,7 +351,7 @@ const Practice = () => {
 
             <motion.button whileHover={{ scale: 1.01, y: -2 }} whileTap={{ scale: 0.98 }}
                 onClick={startPractice} disabled={isGenerating || selectedChapters.length === 0}
-                className={`w-full py-8 rounded-[2.5rem] font-black text-2xl text-white shadow-2xl flex items-center justify-center gap-4 transition-all ${isGenerating || selectedChapters.length === 0 ? 'bg-slate-400 cursor-not-allowed' : `bg-gradient-to-r from-${currentColor}-500 to-${currentColor}-600 shadow-${currentColor}-500/30 hover:shadow-${currentColor}-500/50`}`}>
+                className={`w-full py-8 rounded-[2rem] sm:rounded-[2.5rem] font-black text-xl sm:text-2xl text-white shadow-2xl flex items-center justify-center gap-4 transition-all ${isGenerating || selectedChapters.length === 0 ? 'bg-slate-400 cursor-not-allowed' : `bg-gradient-to-r from-${currentColor}-500 to-${currentColor}-600 shadow-${currentColor}-500/30 hover:shadow-${currentColor}-500/50`}`}>
                 {isGenerating ? (<><Loader2 className="w-8 h-8 animate-spin" /> Synthesizing {questionCount} Problems...</>) : (<><PlayCircle className="w-8 h-8" /> Initiate Simulation</>)}
             </motion.button>
         </div>
