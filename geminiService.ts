@@ -20,6 +20,19 @@ const MODEL_ID = config.modelId || config.genModel || "gemini-2.0-flash";
 const VISION_MODEL = config.visionModel || "gemini-2.0-flash"; 
 const ANALYSIS_MODEL = config.analysisModel || "gemini-2.0-flash";
 
+// Global Rate Limiter
+let lastRequestTimestamp = 0;
+const MIN_GLOBAL_REQUEST_INTERVAL = 3000; // Minimum 3s between ANY request globally
+
+const enforceGlobalThrottle = async () => {
+    const now = Date.now();
+    const timeSinceLast = now - lastRequestTimestamp;
+    if (timeSinceLast < MIN_GLOBAL_REQUEST_INTERVAL) {
+        await new Promise(resolve => setTimeout(resolve, MIN_GLOBAL_REQUEST_INTERVAL - timeSinceLast));
+    }
+    lastRequestTimestamp = Date.now();
+};
+
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -111,7 +124,9 @@ const getAvailableApiKeys = (): string[] => {
   return Array.from(new Set(keys)).filter(k => !!k);
 };
 
-const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000, keyOffset = 0): Promise<any> => {
+const safeGenerateContent = async (params: any, retries = 4, initialDelay = 5000, keyOffset = 0): Promise<any> => {
+    await enforceGlobalThrottle();
+
     try {
         const keys = getAvailableApiKeys();
         if (keys.length === 0) throw new Error("No API Keys found.");
@@ -119,41 +134,50 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000
         const activeKey = keys[keyOffset % keys.length];
         const ai = new GoogleGenAI({ apiKey: activeKey });
         
+        // Intelligent Model Fallback Strategy
+        // If we are deep in retries (likely hitting 429 on primary), try fallback model
+        let effectiveModel = params.model;
+        if (params.model.includes('gemini-2.0-flash') && retries <= 2) {
+            effectiveModel = 'gemini-1.5-flash';
+            console.debug("Switching to fallback model: gemini-1.5-flash to bypass quota");
+        }
+
         return await ai.models.generateContent({
-            model: params.model, 
+            model: effectiveModel, 
             contents: params.contents,
             config: params.config
         });
     } catch (e: any) {
         console.warn(`GenAI Error (${params.model}):`, e.message || e);
         
-        if (e.message?.includes('404') || e.status === 404) {
-             if (params.model !== 'gemini-1.5-flash') {
-                 // Fallback model if 2.0 is not available/found
-                 params.model = "gemini-1.5-flash";
-                 return safeGenerateContent(params, retries, initialDelay, keyOffset);
-             }
-        }
-
-        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.status === 403;
+        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.status === 403 || e.message?.includes('Quota exceeded');
         const isServerOverload = e.status === 503;
+        const isNotFound = e.status === 404 || e.message?.includes('404');
 
         if (retries > 0) {
+            if (isNotFound) {
+                 if (params.model !== 'gemini-1.5-flash') {
+                     params.model = "gemini-1.5-flash";
+                     return safeGenerateContent(params, retries, initialDelay, keyOffset);
+                 }
+            }
+
             if (isRateLimit) {
                 // Improved Rate Limit Handling
-                let waitTime = Math.max(initialDelay * 2, 10000); // Default to 10s minimum
+                let waitTime = Math.max(initialDelay * 2, 8000); 
                 
-                // Parse "retry in Xs" from error message
+                // Parse "retry in Xs" from error message with high precision
                 const match = e.message?.match(/retry in ([0-9.]+)(s|ms)?/i);
                 if (match && match[1]) {
                     const val = parseFloat(match[1]);
                     const unit = match[2] || 's';
-                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 3000; // Add 3s buffer
+                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 2000; // +2s buffer
                 }
                 
-                console.log(`[Rate Limit] Pausing for ${Math.round(waitTime/1000)}s before retry...`);
+                console.log(`[Rate Limit] Switching key & Pausing for ${Math.round(waitTime/1000)}s...`);
                 await delay(waitTime);
-                // Retry with next key
+                
+                // Rotate key AND decrement retries
                 return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
             }
             
@@ -217,7 +241,6 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
   const count = batchMcqCount + batchNumCount;
   if (count === 0) return [];
 
-  // Optimized prompt for larger batches
   const prompt = `
     Create ${count} unique ${subject} questions for ${type}.
     Distribution: ${batchMcqCount} MCQs (4 options), ${batchNumCount} Numericals.
@@ -253,9 +276,7 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
         }
     });
 
-    // Flexible slicing to maximize yield even if distribution is slightly off
     const finalMcqs = validMcqs.slice(0, batchMcqCount);
-    // If we missed MCQs but have extra Nums (or vice versa), unlikely but handled by loop
     const finalNums = validNums.slice(0, batchNumCount);
 
     return [...finalMcqs, ...finalNums]
@@ -300,26 +321,23 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
   const allQuestions: Question[] = [];
   
-  // STRATEGY: Large Batch Size (10) to reduce total requests (RPM Limit).
+  // STRATEGY: Maximize batch size (12) to minimize API calls (RPM).
   // Gemini 2.0 Flash handles large contexts easily.
-  const BATCH_SIZE = 10; 
+  const BATCH_SIZE = 12; 
 
   let mcqNeeded = totalMcqTarget;
   let numNeeded = totalNumTarget;
   let failSafe = 0;
 
-  while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 15) {
+  while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 12) {
       let currentMcq = 0;
       let currentNum = 0;
 
-      // Logic to fill batch
       if (mcqNeeded > 0 && numNeeded > 0) {
-          // Try to balance within the batch of 10
           const mcqShare = Math.min(mcqNeeded, Math.ceil(BATCH_SIZE * 0.7)); 
           currentMcq = mcqShare;
           currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
           
-          // Fill remainder if space exists
           if (currentMcq + currentNum < BATCH_SIZE) {
              if (mcqNeeded > currentMcq) currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
              else if (numNeeded > currentNum) currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
@@ -336,10 +354,9 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           const batch = await generateQuestionBatch(subject, currentMcq, currentNum, type, topicFocus);
           
           if (batch.length === 0) {
-              console.warn("Empty batch returned. Pausing significantly before retry...");
+              console.warn("Empty batch returned. Retrying with delay...");
               failSafe++;
-              // If batch failed (likely 429), wait 20s before retrying to let quota refill
-              await delay(20000); 
+              await delay(10000); 
               continue;
           }
 
@@ -357,12 +374,12 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       } catch (e) {
           console.error("Batch error:", e);
           failSafe++;
-          await delay(20000); // Error wait
+          await delay(10000); 
       }
       
-      // Request Cool-down: 15s delay between successful batches
+      // Request Cool-down: 10s delay between successful batches + global throttle handles min spacing
       if (mcqNeeded > 0 || numNeeded > 0) {
-          await delay(15000); 
+          await delay(10000); 
       }
   }
 
@@ -374,11 +391,11 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
+    // Sequential generation with heavy delays to allow token bucket refill
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    // 20s Delay between subjects to clear Token/Request buffers
-    await delay(20000);
+    await delay(15000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(20000);
+    await delay(15000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
     return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
