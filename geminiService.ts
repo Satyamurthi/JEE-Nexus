@@ -140,18 +140,19 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000
         if (retries > 0) {
             if (isRateLimit) {
                 // Improved Rate Limit Handling: Parse Retry-After or use exponential backoff
-                let waitTime = initialDelay;
-                const match = e.message?.match(/retry in ([0-9.]+)s/);
+                let waitTime = Math.max(initialDelay * 2, 10000); // Default robust backoff
+                
+                // Try to extract exact wait time from message (e.g., "retry in 36s" or "retry in 15.12s")
+                const match = e.message?.match(/retry in ([0-9.]+)(s|ms)?/i);
                 
                 if (match && match[1]) {
-                    // If API explicitly says "retry in X seconds", use that + 2s buffer
-                    waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 2000;
-                } else {
-                    // Otherwise, force a significant delay (minimum 10s for 429)
-                    waitTime = Math.max(initialDelay * 2, 10000);
+                    const val = parseFloat(match[1]);
+                    const unit = match[2] || 's';
+                    // Convert to ms and add buffer
+                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 3000;
                 }
                 
-                console.log(`[Rate Limit] Retrying in ${Math.round(waitTime/1000)}s...`);
+                console.log(`[Rate Limit] Pausing for ${Math.round(waitTime/1000)}s before retry...`);
                 await delay(waitTime);
                 // Rotate key if possible and retry
                 return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
@@ -213,7 +214,8 @@ export const refineQuestionText = async (text: string): Promise<string> => {
   return text; 
 };
 
-// Generates a SMALL batch of questions to avoid token limits and errors
+// Generates a BATCH of questions.
+// Note: Increased efficiency to utilize token count over request count.
 const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, batchNumCount: number, type: ExamType, topicFocus: string): Promise<Question[]> => {
   const count = batchMcqCount + batchNumCount;
   if (count === 0) return [];
@@ -314,8 +316,10 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
   if (topics && topics.length > 0) topicFocus += ` | Topics: ${topics.join(', ')}`;
 
   const allQuestions: Question[] = [];
-  // Reduced Batch Size to 3 to prevent TPM limits and reduce probability of 429
-  const BATCH_SIZE = 3; 
+  
+  // OPTIMIZATION: Use larger batch size to reduce number of requests (RPM limit mitigation)
+  // Gemini 2.0 Flash has large context window, so 5-7 questions is safe and reduces total API calls.
+  const BATCH_SIZE = 5; 
 
   let mcqNeeded = totalMcqTarget;
   let numNeeded = totalNumTarget;
@@ -329,11 +333,15 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
       // Fill batch with available needs, maxing out at BATCH_SIZE
       if (mcqNeeded > 0 && numNeeded > 0) {
-          currentMcq = Math.min(mcqNeeded, 2); // Split evenly if possible
+          currentMcq = Math.min(mcqNeeded, Math.ceil(BATCH_SIZE / 2)); // Split evenly if possible
           currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
           // If space remains and we need more MCQs, take them
           if (currentMcq + currentNum < BATCH_SIZE && mcqNeeded > currentMcq) {
               currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
+          }
+          // If space remains and we need more Nums, take them
+          if (currentMcq + currentNum < BATCH_SIZE && numNeeded > currentNum) {
+              currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
           }
       } else if (mcqNeeded > 0) {
           currentMcq = Math.min(mcqNeeded, BATCH_SIZE);
@@ -349,7 +357,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           if (batch.length === 0) {
               console.warn("Empty batch returned. Retrying...");
               failSafe++;
-              await delay(2000);
+              await delay(3000); // Wait a bit before retrying an empty batch
               continue;
           }
 
@@ -371,8 +379,11 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           failSafe++;
       }
       
-      // Increased inter-batch delay to 4s to stay within safe RPM (Request Per Minute) limits
-      await delay(4000); 
+      // OPTIMIZATION: Significant Inter-Batch Delay to respect Rate Limits (15 RPM)
+      // 8s delay + ~2s processing = ~10s per request = 6 Requests Per Minute. Safe.
+      if (mcqNeeded > 0 || numNeeded > 0) {
+          await delay(8000); 
+      }
   }
 
   // Final sanity trim (in case we overshot slightly)
@@ -385,14 +396,15 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    // Increased delay between subjects to 5s to allow token bucket to refill
-    await delay(5000);
+    // Increased delay between subjects to allow token bucket to refill significantly
+    await delay(10000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(5000);
+    await delay(10000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
     return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
   } catch (error) {
+    console.error("Full Paper Gen Error:", error);
     return { physics: [], chemistry: [], mathematics: [] };
   }
 };
