@@ -129,6 +129,7 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000
         
         if (e.message?.includes('404') || e.status === 404) {
              if (params.model !== 'gemini-1.5-flash') {
+                 // Fallback model if 2.0 is not available/found
                  params.model = "gemini-1.5-flash";
                  return safeGenerateContent(params, retries, initialDelay, keyOffset);
              }
@@ -139,22 +140,20 @@ const safeGenerateContent = async (params: any, retries = 3, initialDelay = 2000
 
         if (retries > 0) {
             if (isRateLimit) {
-                // Improved Rate Limit Handling: Parse Retry-After or use exponential backoff
-                let waitTime = Math.max(initialDelay * 2, 10000); // Default robust backoff
+                // Improved Rate Limit Handling
+                let waitTime = Math.max(initialDelay * 2, 10000); // Default to 10s minimum
                 
-                // Try to extract exact wait time from message (e.g., "retry in 36s" or "retry in 15.12s")
+                // Parse "retry in Xs" from error message
                 const match = e.message?.match(/retry in ([0-9.]+)(s|ms)?/i);
-                
                 if (match && match[1]) {
                     const val = parseFloat(match[1]);
                     const unit = match[2] || 's';
-                    // Convert to ms and add buffer
-                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 3000;
+                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 3000; // Add 3s buffer
                 }
                 
                 console.log(`[Rate Limit] Pausing for ${Math.round(waitTime/1000)}s before retry...`);
                 await delay(waitTime);
-                // Rotate key if possible and retry
+                // Retry with next key
                 return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
             }
             
@@ -214,30 +213,17 @@ export const refineQuestionText = async (text: string): Promise<string> => {
   return text; 
 };
 
-// Generates a BATCH of questions.
-// Note: Increased efficiency to utilize token count over request count.
 const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, batchNumCount: number, type: ExamType, topicFocus: string): Promise<Question[]> => {
   const count = batchMcqCount + batchNumCount;
   if (count === 0) return [];
 
+  // Optimized prompt for larger batches
   const prompt = `
-    ACT AS A STRICT EXAM SETTER for JEE Advanced.
-    Subject: ${subject}
-    Total Questions To Generate: ${count}
-    
-    MANDATORY DISTRIBUTION:
-    1. EXACTLY ${batchMcqCount} questions MUST be 'MCQ' (Multiple Choice with 4 options).
-    2. EXACTLY ${batchNumCount} questions MUST be 'Numerical' (Integer/Decimal value answer, NO options).
-    
-    STRICT CONTENT RULES:
-    - Topics: ${topicFocus}
-    - Difficulty: HARD (JEE Advanced Level)
-    - Math Formatting: Use LaTeX wrapped in '$' (e.g. $x^2$).
-    - JSON Format: Strictly valid JSON array.
-    - For 'MCQ', "options" array must have 4 strings.
-    - For 'Numerical', "options" array must be empty or null.
-    
-    Output ONLY the JSON Array.
+    Create ${count} unique ${subject} questions for ${type}.
+    Distribution: ${batchMcqCount} MCQs (4 options), ${batchNumCount} Numericals.
+    Topics: ${topicFocus}. Difficulty: Hard/Advanced.
+    Use LaTeX for Math ($...$). Return ONLY a JSON Array.
+    JSON Keys: subject, chapter, type, difficulty, statement, options (for MCQ), correctAnswer, solution, explanation, concept.
   `;
 
   try {
@@ -252,14 +238,11 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
     const data = cleanAndParseJSON(extractText(response));
     const rawList = Array.isArray(data) ? data : [];
     
-    // STRICT POST-PROCESSING TO ENFORCE COUNTS AND AVOID DUPLICATES
     const validMcqs: any[] = [];
     const validNums: any[] = [];
     
     rawList.forEach((q: any) => {
-        // Safe check for options
         const hasValidOptions = Array.isArray(q.options) && q.options.length >= 2;
-        
         if (hasValidOptions) {
             q.type = 'MCQ';
             validMcqs.push(q);
@@ -270,8 +253,9 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
         }
     });
 
-    // 2. Trim excess questions to match exact request for this batch
+    // Flexible slicing to maximize yield even if distribution is slightly off
     const finalMcqs = validMcqs.slice(0, batchMcqCount);
+    // If we missed MCQs but have extra Nums (or vice versa), unlikely but handled by loop
     const finalNums = validNums.slice(0, batchNumCount);
 
     return [...finalMcqs, ...finalNums]
@@ -303,7 +287,6 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
   }
 };
 
-// New Batched Generator to handle large requests without timeouts or truncation
 export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string | Difficulty, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
   let totalMcqTarget = distribution ? distribution.mcq : Math.ceil(count * 0.8);
   let totalNumTarget = distribution ? distribution.numerical : count - totalMcqTarget;
@@ -317,31 +300,29 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
   const allQuestions: Question[] = [];
   
-  // OPTIMIZATION: Use larger batch size to reduce number of requests (RPM limit mitigation)
-  // Gemini 2.0 Flash has large context window, so 5-7 questions is safe and reduces total API calls.
-  const BATCH_SIZE = 5; 
+  // STRATEGY: Large Batch Size (10) to reduce total requests (RPM Limit).
+  // Gemini 2.0 Flash handles large contexts easily.
+  const BATCH_SIZE = 10; 
 
   let mcqNeeded = totalMcqTarget;
   let numNeeded = totalNumTarget;
   let failSafe = 0;
 
-  // Loop until we have enough questions or fail safe triggers
   while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 15) {
-      // Calculate current batch composition
       let currentMcq = 0;
       let currentNum = 0;
 
-      // Fill batch with available needs, maxing out at BATCH_SIZE
+      // Logic to fill batch
       if (mcqNeeded > 0 && numNeeded > 0) {
-          currentMcq = Math.min(mcqNeeded, Math.ceil(BATCH_SIZE / 2)); // Split evenly if possible
+          // Try to balance within the batch of 10
+          const mcqShare = Math.min(mcqNeeded, Math.ceil(BATCH_SIZE * 0.7)); 
+          currentMcq = mcqShare;
           currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
-          // If space remains and we need more MCQs, take them
-          if (currentMcq + currentNum < BATCH_SIZE && mcqNeeded > currentMcq) {
-              currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
-          }
-          // If space remains and we need more Nums, take them
-          if (currentMcq + currentNum < BATCH_SIZE && numNeeded > currentNum) {
-              currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
+          
+          // Fill remainder if space exists
+          if (currentMcq + currentNum < BATCH_SIZE) {
+             if (mcqNeeded > currentMcq) currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
+             else if (numNeeded > currentNum) currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
           }
       } else if (mcqNeeded > 0) {
           currentMcq = Math.min(mcqNeeded, BATCH_SIZE);
@@ -355,38 +336,36 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           const batch = await generateQuestionBatch(subject, currentMcq, currentNum, type, topicFocus);
           
           if (batch.length === 0) {
-              console.warn("Empty batch returned. Retrying...");
+              console.warn("Empty batch returned. Pausing significantly before retry...");
               failSafe++;
-              await delay(3000); // Wait a bit before retrying an empty batch
+              // If batch failed (likely 429), wait 20s before retrying to let quota refill
+              await delay(20000); 
               continue;
           }
 
           allQuestions.push(...batch);
 
-          // Update needs based on what we ACTUALLY got
           const gotMcq = batch.filter(q => q.type === 'MCQ').length;
           const gotNum = batch.filter(q => q.type === 'Numerical').length;
 
           mcqNeeded = Math.max(0, mcqNeeded - gotMcq);
           numNeeded = Math.max(0, numNeeded - gotNum);
           
-          // Safety check: if we aren't getting what we asked for, increment failsafe to prevent infinite loop
           if (gotMcq === 0 && currentMcq > 0) failSafe++;
           if (gotNum === 0 && currentNum > 0) failSafe++;
 
       } catch (e) {
           console.error("Batch error:", e);
           failSafe++;
+          await delay(20000); // Error wait
       }
       
-      // OPTIMIZATION: Significant Inter-Batch Delay to respect Rate Limits (15 RPM)
-      // 8s delay + ~2s processing = ~10s per request = 6 Requests Per Minute. Safe.
+      // Request Cool-down: 15s delay between successful batches
       if (mcqNeeded > 0 || numNeeded > 0) {
-          await delay(8000); 
+          await delay(15000); 
       }
   }
 
-  // Final sanity trim (in case we overshot slightly)
   const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
   const finalNums = allQuestions.filter(q => q.type === 'Numerical').slice(0, totalNumTarget);
 
@@ -396,10 +375,10 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    // Increased delay between subjects to allow token bucket to refill significantly
-    await delay(10000);
+    // 20s Delay between subjects to clear Token/Request buffers
+    await delay(20000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(10000);
+    await delay(20000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
     return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
@@ -420,26 +399,14 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 
   const prompt = `
   Analyze the provided document(s) and extract EVERY question from ALL subjects (Physics, Chemistry, Mathematics).
-  
   STRICT FORMATTING RULES:
   1. Return ONLY a valid JSON Array.
-  2. Escape all LaTeX backslashes. Example: use "\\\\alpha" for \\alpha.
-  3. Wrap math in $ delimiters (e.g. $x^2$, $\\frac{a}{b}$).
-  4. Use \\frac{}{} for fractions, not /.
-  5. Avoid unicode for math symbols (use $\\beta$ not \\u03B2).
-  6. Detect Subject from headers (SECTION - A etc).
+  2. Escape all LaTeX backslashes.
+  3. Wrap math in $ delimiters.
+  4. Detect Subject from headers.
   
   JSON Structure:
-  [
-    {
-      "subject": "Physics",
-      "statement": "Question...",
-      "type": "MCQ",
-      "options": ["A", "B", "C", "D"],
-      "correctAnswer": "A",
-      "solution": "Solution..."
-    }
-  ]
+  [{ "subject": "Physics", "statement": "Question...", "type": "MCQ", "options": ["A", "B", "C", "D"], "correctAnswer": "A", "solution": "Solution..." }]
   `;
 
   try {
@@ -465,9 +432,7 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
       .filter((q: any) => q && typeof q === 'object')
       .map((q: any, idx: number) => {
         const defaultMarking = { positive: 4, negative: 1 };
-        const safeMarkingScheme = (q.markingScheme && typeof q.markingScheme === 'object' && typeof q.markingScheme.positive === 'number')
-            ? q.markingScheme
-            : defaultMarking;
+        const safeMarkingScheme = (q.markingScheme && typeof q.markingScheme === 'object' && typeof q.markingScheme.positive === 'number') ? q.markingScheme : defaultMarking;
 
         return {
             ...q,
