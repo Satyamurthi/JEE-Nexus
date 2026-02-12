@@ -1,4 +1,3 @@
-
 # JEE Nexus AI - Setup & Deployment Guide
 
 This guide covers setting up the project locally, deploying to GitHub/Netlify, and configuring the Supabase backend.
@@ -37,10 +36,17 @@ This guide covers setting up the project locally, deploying to GitHub/Netlify, a
 ## 3. Backend (Supabase) Setup
 
 1.  Create a new project in [Supabase](https://supabase.com).
-2.  Go to the **SQL Editor** and run the following script to create the necessary tables, triggers, and permissions. **Run this entire block at once.**
+2.  Go to the **SQL Editor** and run the following script. This script will create all tables, set up permissions (RLS), and **automatically create your Admin account**.
+
+**Run this entire block at once:**
 
 ```sql
--- 1. SETUP PROFILES TABLE (Extends Auth)
+-- ==========================================
+-- 1. EXTENSIONS & CORE TABLES
+-- ==========================================
+create extension if not exists pgcrypto;
+
+-- PROFILES TABLE (Extends Auth)
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade not null primary key,
   email text unique not null,
@@ -50,28 +56,72 @@ create table if not exists public.profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 2. ENABLE ROW LEVEL SECURITY
+-- ==========================================
+-- 2. ADMIN PROVISIONING (CRITICAL)
+-- ==========================================
+-- This block creates name@admin.com with password admin123
+-- If user already exists, it updates their status to admin.
+
+DO $$
+DECLARE
+  new_user_id UUID := gen_random_uuid();
+BEGIN
+  -- Check if admin exists in auth.users
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
+    INSERT INTO auth.users (
+      instance_id, id, aud, role, email, 
+      encrypted_password, email_confirmed_at, 
+      raw_app_meta_data, raw_user_meta_data, 
+      created_at, updated_at, confirmation_token, 
+      recovery_token
+    )
+    VALUES (
+      '00000000-0000-0000-0000-000000000000',
+      new_user_id,
+      'authenticated',
+      'authenticated',
+      'name@admin.com',
+      crypt('admin123', gen_salt('bf')), -- Generates hashed 'admin123'
+      now(),
+      '{"provider":"email","providers":["email"]}',
+      '{"full_name": "System Admin"}',
+      now(), now(), '', ''
+    );
+  END IF;
+
+  -- Ensure the record exists in public.profiles and set as approved admin
+  INSERT INTO public.profiles (id, email, full_name, role, status)
+  SELECT id, email, 'System Admin', 'admin', 'approved'
+  FROM auth.users WHERE email = 'name@admin.com'
+  ON CONFLICT (id) DO UPDATE 
+  SET role = 'admin', status = 'approved', full_name = 'System Admin';
+
+END $$;
+
+-- ==========================================
+-- 3. PERMISSIONS & TRIGGERS
+-- ==========================================
 alter table public.profiles enable row level security;
 
--- 3. RESET PROFILE POLICIES (Fixes Permissions)
+-- RESET PROFILE POLICIES
 drop policy if exists "Public profiles are viewable by everyone" on profiles;
 create policy "Public profiles are viewable by everyone" on profiles for select using (true);
 
 drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 
--- CRITICAL FIX: Allow Admins to update ANY profile (Fixes "Approve Not Working")
 drop policy if exists "Admins can update all profiles" on profiles;
 create policy "Admins can update all profiles" on profiles for update using (
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
 
--- 4. AUTO-CREATE PROFILE TRIGGER (Fixes "New Users Not Appearing")
+-- AUTO-CREATE PROFILE FUNCTION
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
   insert into public.profiles (id, email, full_name, role, status)
-  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending');
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending')
+  on conflict (id) do nothing;
   return new;
 end;
 $$ language plpgsql security definer;
@@ -81,7 +131,11 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
--- 5. QUESTIONS BANK
+-- ==========================================
+-- 4. APPLICATION DATA TABLES
+-- ==========================================
+
+-- QUESTIONS BANK
 create table if not exists public.questions (
   id uuid default gen_random_uuid() primary key,
   subject text not null,
@@ -89,7 +143,7 @@ create table if not exists public.questions (
   type text check (type in ('MCQ', 'Numerical')),
   difficulty text,
   statement text not null,
-  options jsonb, -- Array of strings
+  options jsonb, 
   "correctAnswer" text not null,
   solution text,
   explanation text,
@@ -101,44 +155,31 @@ alter table public.questions enable row level security;
 create policy "Read questions" on questions for select using (true);
 create policy "Insert questions" on questions for insert with check (true);
 
--- 6. DAILY CHALLENGES (One paper per day)
+-- DAILY CHALLENGES
 create table if not exists public.daily_challenges (
-  date date primary key, -- YYYY-MM-DD
-  questions jsonb not null, -- Array of question objects
+  date date primary key,
+  questions jsonb not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 alter table public.daily_challenges enable row level security;
+create policy "Public Read Daily" on daily_challenges for select using (true);
+create policy "Public Insert Daily" on daily_challenges for insert with check (true);
+create policy "Public Update Daily" on daily_challenges for update using (true);
 
--- 7. DAILY ATTEMPTS (Student submissions)
+-- DAILY ATTEMPTS
 create table if not exists public.daily_attempts (
   user_id uuid references public.profiles(id) on delete cascade not null,
   date date references public.daily_challenges(date) on delete cascade not null,
   score integer,
   total_marks integer,
-  stats jsonb, -- { accuracy, timeTaken, etc }
-  attempt_data jsonb, -- Detailed question-wise analysis
+  stats jsonb,
+  attempt_data jsonb,
   submitted_at timestamp with time zone default timezone('utc'::text, now()) not null,
   primary key (user_id, date)
 );
 alter table public.daily_attempts enable row level security;
-
--- 8. POLICIES FOR EXAM DATA
-drop policy if exists "Public Read Daily" on daily_challenges;
-create policy "Public Read Daily" on daily_challenges for select using (true);
-
-drop policy if exists "Public Insert Daily" on daily_challenges;
-create policy "Public Insert Daily" on daily_challenges for insert with check (true);
-
-drop policy if exists "Public Update Daily" on daily_challenges;
-create policy "Public Update Daily" on daily_challenges for update using (true);
-
-drop policy if exists "Users can insert own attempts" on daily_attempts;
 create policy "Users can insert own attempts" on daily_attempts for insert with check (auth.uid() = user_id);
-
-drop policy if exists "Users can view own attempts" on daily_attempts;
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
-
-drop policy if exists "Admins view all attempts" on daily_attempts;
 create policy "Admins view all attempts" on daily_attempts for select using ( 
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
@@ -146,7 +187,7 @@ create policy "Admins view all attempts" on daily_attempts for select using (
 
 3.  **Authentication Settings**:
     *   Go to **Authentication -> Providers**. Enable Email/Password.
-    *   Disable "Confirm email" if you want instant login for testing.
+    *   **Disable "Confirm email"** in Supabase settings if you want to login immediately with `admin123`.
 
 ---
 
@@ -160,23 +201,4 @@ create policy "Admins view all attempts" on daily_attempts for select using (
 
 ### Netlify
 1.  Log in to [Netlify](https://netlify.com).
-2.  Click **"Add new site"** -> **"Import from Git"**.
-3.  Select your GitHub repository.
-4.  **Build Settings**:
-    *   Build Command: `npm run build`
-    *   Publish Directory: `build` (or `dist` depending on Vite/CRA)
-5.  **Environment Variables**:
-    *   Click "Show advanced" or go to Site Settings -> Environment variables after creation.
-    *   Add `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, and `API_KEY`.
-6.  Click **Deploy**.
-
----
-
-## 5. Post-Deployment Configuration (Admin Panel)
-
-1.  Log in to your live site using the **Root Admin Credentials**:
-    *   Email: `example@gmail.com`
-    *   Password: `admin123`
-2.  Navigate to **Admin Panel** -> **System Settings**.
-3.  Enter your **Supabase URL**, **Supabase Anon Key**, and **Google Gemini API Key**.
-4.  Click **Save Configuration**. The app will reload and use these keys for all operations.
+2.  Click **"Add new site"** -> **"Import

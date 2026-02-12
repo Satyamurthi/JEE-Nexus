@@ -27,7 +27,8 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+// Fix: Explicitly use React.Component to resolve typing issues where setState and props were not being detected correctly on the class instance.
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
