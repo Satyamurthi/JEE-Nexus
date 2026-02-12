@@ -1,6 +1,6 @@
+
 import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-// Fixed: Removed 'Layout' as it is not a valid export from lucide-react
 import { LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MENU_ITEMS, APP_NAME } from './constants';
@@ -27,12 +27,16 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fix: Extending Component directly from the named import to resolve typing issues where setState and props were not detected correctly.
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+// Fix: Corrected NetworkErrorBoundary to properly extend React.Component with typed props and state
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
-    const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
+    const msg = error.message?.toLowerCase() || '';
+    const isNetwork = msg.includes('network') || msg.includes('fetch') || error.name === 'ChunkLoadError';
     return { hasError: true, errorType: isNetwork ? 'network' : 'logic' };
   }
 
@@ -48,12 +52,12 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </h2>
           <p className="text-slate-500 text-sm mb-8 max-w-sm leading-relaxed mx-auto font-medium">
             {this.state.errorType === 'network' 
-              ? 'Your internet connection dropped while loading this module. Reconnect to resume.' 
+              ? 'A critical network request failed. This often happens due to unstable connectivity or blocked API endpoints.' 
               : 'A cognitive processing error occurred while initializing this section.'}
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
               <button 
-                onClick={() => this.setState({ hasError: false })}
+                onClick={() => window.location.reload()}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
               >
                 <RefreshCw className="w-4 h-4" />
@@ -108,7 +112,7 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
   const profile = JSON.parse(localStorage.getItem('user_profile') || '{}');
 
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut().catch(() => {});
     localStorage.removeItem('user_profile');
     navigate('/login');
   };

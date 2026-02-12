@@ -1,3 +1,4 @@
+
 import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
@@ -27,9 +28,12 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fix: Extending Component directly from the named import to resolve typing issues where setState and props were not detected correctly.
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+// Fix: Corrected NetworkErrorBoundary to properly extend React.Component with typed props and state
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
@@ -53,7 +57,7 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
               <button 
-                onClick={() => this.setState({ hasError: false })}
+                onClick={() => window.location.reload()}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
               >
                 <RefreshCw className="w-4 h-4" />

@@ -11,8 +11,9 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Helper to generate content using the SDK following guidelines
 const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
     // API Key must be obtained exclusively from the environment variable process.env.API_KEY.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Use directly as per instructions.
     try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         // MUST use ai.models.generateContent to query GenAI with both the model name and prompt.
         const response = await ai.models.generateContent({
             model: params.model, 
@@ -21,7 +22,8 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
         });
         return response;
     } catch (e: any) {
-        console.error("Gemini API error:", e);
+        // Log the specific error but don't let a generic "Failed to fetch" kill the user experience
+        console.warn("Gemini API request failed:", e.message || e);
         throw e;
     }
 };
@@ -77,19 +79,23 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       // Accessing text directly from GenerateContentResponse as per guidelines.
       const text = response.text;
       if (text) {
-          const data = JSON.parse(text);
-          if (Array.isArray(data)) {
-              allQuestions.push(...data.map((q, i) => ({
-                  ...q,
-                  id: `ai-${Date.now()}-${i}`,
-                  subject: q.subject || subject,
-                  type: q.options ? 'MCQ' : 'Numerical',
-                  markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
-              })));
+          try {
+              const data = JSON.parse(text);
+              if (Array.isArray(data)) {
+                  allQuestions.push(...data.map((q: any, i: number) => ({
+                      ...q,
+                      id: `ai-${Date.now()}-${i}`,
+                      subject: q.subject || subject,
+                      type: q.options ? 'MCQ' : 'Numerical',
+                      markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
+                  })));
+              }
+          } catch (parseErr) {
+              console.warn("[AI] Failed to parse JSON response, falling back.");
           }
       }
   } catch (e) {
-      console.warn("[AI] Gemini generation failed, reverting to secondary sources.");
+      console.warn("[AI] Gemini generation failed or blocked, reverting to secondary sources.");
   }
 
   // --- ATTEMPT 2: HUGGING FACE DATASET ---
@@ -97,9 +103,11 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       const needed = count - allQuestions.length;
       try {
           const hfQuestions = await fetchJEEFromHuggingFace(subject, needed);
-          allQuestions.push(...hfQuestions);
+          if (hfQuestions && hfQuestions.length > 0) {
+              allQuestions.push(...hfQuestions);
+          }
       } catch (e) {
-          console.warn("[Dataset] HF API failed.");
+          console.warn("[Dataset] HF fetch unsuccessful.");
       }
   }
 
@@ -154,17 +162,17 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
     });
   };
 
-  const qData = await fileToBase64(questionFile);
-  const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qData } }];
-  
-  if (solutionFile) {
-    const sData = await fileToBase64(solutionFile);
-    parts.push({ inlineData: { mimeType: solutionFile.type, data: sData } });
-  }
-
-  const prompt = `Digitize and structure the JEE questions from these documents. Output a JSON array matching the schema. Use LaTeX for math.`;
-  
   try {
+    const qData = await fileToBase64(questionFile);
+    const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qData } }];
+    
+    if (solutionFile) {
+      const sData = await fileToBase64(solutionFile);
+      parts.push({ inlineData: { mimeType: solutionFile.type, data: sData } });
+    }
+
+    const prompt = `Digitize and structure the JEE questions from these documents. Output a JSON array matching the schema. Use LaTeX for math.`;
+    
     const response = await safeGenerateContent({ 
       model: MODEL_ID, 
       contents: { parts: [...parts, { text: prompt }] }, 
@@ -175,7 +183,10 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
     const data = JSON.parse(text);
     if (!Array.isArray(data)) throw new Error("Unexpected data structure");
     return data.map((q, idx) => ({ ...q, id: `parsed-${Date.now()}-${idx}` }));
-  } catch (error) { throw error; }
+  } catch (error) { 
+    console.error("Document parsing failed:", error);
+    throw error; 
+  }
 };
 
 export const getDeepAnalysis = async (result: any) => {
@@ -184,6 +195,8 @@ export const getDeepAnalysis = async (result: any) => {
           model: MODEL_ID, 
           contents: `Review this JEE performance data and provide a mentorship summary including strong areas and critical improvements: ${JSON.stringify(result).substring(0, 8000)}` 
         });
-        return response.text;
-    } catch (e) { return "Cognitive analysis is temporarily unavailable."; }
+        return response.text || "Analysis complete. Keep practicing consistent drills.";
+    } catch (e) { 
+        return "Cognitive analysis is temporarily unavailable due to a network disruption."; 
+    }
 };
