@@ -162,14 +162,14 @@
         </div>
     </div>
     <script>
-        // Detection for extremely slow networks
+        // Detection for extremely slow networks - Extended timeout to 12s
         window._bootTimer = setTimeout(() => {
             const troubleshoot = document.getElementById('loader-troubleshoot');
             if (troubleshoot && document.getElementById('app-loader')) {
                 troubleshoot.style.display = 'flex';
                 document.getElementById('loader-msg').textContent = "OPTIMIZING LINK";
             }
-        }, 6000); 
+        }, 12000); 
 
         // Fast path for clearing loader
         window.addEventListener('DOMContentLoaded', () => {

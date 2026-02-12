@@ -2,6 +2,7 @@
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
 import { NCERT_CHAPTERS } from "./constants";
+import { getLocalQuestions } from "./data/jee_dataset"; // Import fallback dataset
 
 // Configuration Defaults
 const getModelConfig = () => {
@@ -124,22 +125,25 @@ const getAvailableApiKeys = (): string[] => {
   return Array.from(new Set(keys)).filter(k => !!k);
 };
 
-const safeGenerateContent = async (params: any, retries = 4, initialDelay = 5000, keyOffset = 0): Promise<any> => {
+const safeGenerateContent = async (params: any, retries = 2, initialDelay = 5000, keyOffset = 0): Promise<any> => {
     await enforceGlobalThrottle();
 
     try {
         const keys = getAvailableApiKeys();
-        if (keys.length === 0) throw new Error("No API Keys found.");
+        
+        // --- HYBRID FALLBACK MECHANISM ---
+        // If no API keys are present, throw specific error to trigger local fallback
+        if (keys.length === 0) {
+            throw new Error("NO_API_KEYS"); 
+        }
         
         const activeKey = keys[keyOffset % keys.length];
         const ai = new GoogleGenAI({ apiKey: activeKey });
         
         // Intelligent Model Fallback Strategy
-        // If we are deep in retries (likely hitting 429 on primary), try fallback model
         let effectiveModel = params.model;
-        if (params.model.includes('gemini-2.0-flash') && retries <= 2) {
+        if (params.model.includes('gemini-2.0-flash') && retries <= 1) {
             effectiveModel = 'gemini-1.5-flash';
-            console.debug("Switching to fallback model: gemini-1.5-flash to bypass quota");
         }
 
         return await ai.models.generateContent({
@@ -150,41 +154,30 @@ const safeGenerateContent = async (params: any, retries = 4, initialDelay = 5000
     } catch (e: any) {
         console.warn(`GenAI Error (${params.model}):`, e.message || e);
         
+        // Critical: Detect Quota Exhaustion OR Network Failure
         const isRateLimit = e.message?.includes('429') || e.status === 429 || e.status === 403 || e.message?.includes('Quota exceeded');
-        const isServerOverload = e.status === 503;
-        const isNotFound = e.status === 404 || e.message?.includes('404');
+        const isNetworkError = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError') || e.message?.includes('Load failed');
+        
+        if (isNetworkError) {
+             // If network is failing, don't retry endlessly, switch to offline fallback immediately
+             throw new Error("NETWORK_FAILURE");
+        }
 
-        if (retries > 0) {
-            if (isNotFound) {
-                 if (params.model !== 'gemini-1.5-flash') {
-                     params.model = "gemini-1.5-flash";
-                     return safeGenerateContent(params, retries, initialDelay, keyOffset);
-                 }
-            }
-
-            if (isRateLimit) {
-                // Improved Rate Limit Handling
-                let waitTime = Math.max(initialDelay * 2, 8000); 
-                
-                // Parse "retry in Xs" from error message with high precision
-                const match = e.message?.match(/retry in ([0-9.]+)(s|ms)?/i);
-                if (match && match[1]) {
-                    const val = parseFloat(match[1]);
-                    const unit = match[2] || 's';
-                    waitTime = Math.ceil((unit === 'ms' ? val : val * 1000)) + 2000; // +2s buffer
-                }
-                
-                console.log(`[Rate Limit] Switching key & Pausing for ${Math.round(waitTime/1000)}s...`);
-                await delay(waitTime);
-                
-                // Rotate key AND decrement retries
-                return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
+        if (isRateLimit) {
+            // Immediate fallback if we have retried enough or if it's a strict 429
+            if (retries <= 0) {
+                throw new Error("QUOTA_EXCEEDED"); // Custom signal to trigger local fallback
             }
             
-            if (isServerOverload) {
-                await delay(initialDelay * 2);
-                return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset);
-            }
+            let waitTime = Math.max(initialDelay * 2, 5000); 
+            console.log(`[Rate Limit] Switching key & Pausing for ${Math.round(waitTime/1000)}s...`);
+            await delay(waitTime);
+            return safeGenerateContent(params, retries - 1, waitTime, keyOffset + 1);
+        }
+        
+        if (retries > 0) {
+             await delay(initialDelay);
+             return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset);
         }
         throw e;
     }
@@ -302,34 +295,39 @@ const generateQuestionBatch = async (subject: Subject, batchMcqCount: number, ba
                 markingScheme: safeMarkingScheme
             };
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message === "QUOTA_EXCEEDED" || error.message === "NO_API_KEYS" || error.message === "NETWORK_FAILURE") {
+        throw error; // Re-throw to be caught by the main loop fallback
+    }
     console.error(`Batch Gen Failed:`, error);
     return [];
   }
 };
 
 export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string | Difficulty, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
+  
+  // --- OFFLINE FALLBACK MECHANISM ---
+  const useFallback = async () => {
+      console.warn(`[Fallback] Serving offline questions for ${subject}`);
+      await delay(1500); // Simulate network delay for UX consistency
+      return getLocalQuestions(subject, count);
+  };
+
   let totalMcqTarget = distribution ? distribution.mcq : Math.ceil(count * 0.8);
   let totalNumTarget = distribution ? distribution.numerical : count - totalMcqTarget;
   
-  if (totalMcqTarget < 0) totalMcqTarget = 0;
-  if (totalNumTarget < 0) totalNumTarget = 0;
-
   const isFullSyllabus = !chapters || chapters.length === 0;
   let topicFocus = isFullSyllabus ? "Full Syllabus High Weightage" : `Chapters: ${chapters.join(', ')}`;
   if (topics && topics.length > 0) topicFocus += ` | Topics: ${topics.join(', ')}`;
 
   const allQuestions: Question[] = [];
-  
-  // STRATEGY: Maximize batch size (12) to minimize API calls (RPM).
-  // Gemini 2.0 Flash handles large contexts easily.
   const BATCH_SIZE = 12; 
 
   let mcqNeeded = totalMcqTarget;
   let numNeeded = totalNumTarget;
   let failSafe = 0;
 
-  while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 12) {
+  while ((mcqNeeded > 0 || numNeeded > 0) && failSafe < 5) {
       let currentMcq = 0;
       let currentNum = 0;
 
@@ -337,7 +335,6 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           const mcqShare = Math.min(mcqNeeded, Math.ceil(BATCH_SIZE * 0.7)); 
           currentMcq = mcqShare;
           currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
-          
           if (currentMcq + currentNum < BATCH_SIZE) {
              if (mcqNeeded > currentMcq) currentMcq = Math.min(mcqNeeded, BATCH_SIZE - currentNum);
              else if (numNeeded > currentNum) currentNum = Math.min(numNeeded, BATCH_SIZE - currentMcq);
@@ -354,33 +351,38 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           const batch = await generateQuestionBatch(subject, currentMcq, currentNum, type, topicFocus);
           
           if (batch.length === 0) {
-              console.warn("Empty batch returned. Retrying with delay...");
               failSafe++;
-              await delay(10000); 
+              await delay(2000);
               continue;
           }
 
           allQuestions.push(...batch);
+          mcqNeeded = Math.max(0, mcqNeeded - batch.filter(q => q.type === 'MCQ').length);
+          numNeeded = Math.max(0, numNeeded - batch.filter(q => q.type === 'Numerical').length);
 
-          const gotMcq = batch.filter(q => q.type === 'MCQ').length;
-          const gotNum = batch.filter(q => q.type === 'Numerical').length;
-
-          mcqNeeded = Math.max(0, mcqNeeded - gotMcq);
-          numNeeded = Math.max(0, numNeeded - gotNum);
-          
-          if (gotMcq === 0 && currentMcq > 0) failSafe++;
-          if (gotNum === 0 && currentNum > 0) failSafe++;
-
-      } catch (e) {
+      } catch (e: any) {
+          // If we hit the specific Quota/Network Error, switch to fallback IMMEDIATELY
+          if (e.message === "QUOTA_EXCEEDED" || e.message === "NO_API_KEYS" || e.message === "NETWORK_FAILURE") {
+              const remainingCount = totalMcqTarget + totalNumTarget - allQuestions.length;
+              if (remainingCount > 0) {
+                  const fallbackQs = getLocalQuestions(subject, remainingCount);
+                  allQuestions.push(...fallbackQs);
+              }
+              break; // Exit loop, we have filled the rest with offline data
+          }
           console.error("Batch error:", e);
           failSafe++;
-          await delay(10000); 
       }
       
-      // Request Cool-down: 10s delay between successful batches + global throttle handles min spacing
-      if (mcqNeeded > 0 || numNeeded > 0) {
-          await delay(10000); 
-      }
+      if (mcqNeeded > 0 || numNeeded > 0) await delay(5000); 
+  }
+
+  // Final check: If we failed to get enough questions via API, fill the rest from local
+  if (allQuestions.length < count) {
+      const needed = count - allQuestions.length;
+      console.log(`Filling ${needed} remaining questions from local bank`);
+      const extra = getLocalQuestions(subject, needed);
+      allQuestions.push(...extra);
   }
 
   const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
@@ -391,17 +393,21 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential generation with heavy delays to allow token bucket refill
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    await delay(15000);
+    await delay(10000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(15000);
+    await delay(10000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
 
     return { physics: physics || [], chemistry: chemistry || [], mathematics: mathematics || [] };
   } catch (error) {
     console.error("Full Paper Gen Error:", error);
-    return { physics: [], chemistry: [], mathematics: [] };
+    // Fallback for full paper failure
+    return {
+        physics: getLocalQuestions(Subject.Physics, 10),
+        chemistry: getLocalQuestions(Subject.Chemistry, 10),
+        mathematics: getLocalQuestions(Subject.Mathematics, 10)
+    };
   }
 };
 
@@ -476,5 +482,5 @@ export const getDeepAnalysis = async (result: any) => {
             contents: `Analyze exam performance: ${JSON.stringify(result).substring(0, 5000)}. Brief strategic advice.`
         });
         return extractText(response);
-    } catch (e) { return "Analysis unavailable."; }
+    } catch (e) { return "Analysis currently unavailable due to high server load."; }
 };
