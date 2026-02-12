@@ -1,4 +1,3 @@
-
 import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
@@ -28,12 +27,10 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fix: Corrected NetworkErrorBoundary to properly extend React.Component with typed props and state
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+// Fix: Corrected NetworkErrorBoundary to properly extend Component with typed props and state
+// Use property initializer for state to avoid constructor-related TS issues in some environments
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
