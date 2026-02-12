@@ -1,131 +1,29 @@
-
-import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { Subject, ExamType, Question, QuestionType, Difficulty } from "./types";
-import { NCERT_CHAPTERS } from "./constants";
+import { GoogleGenAI, Type } from "@google/genai";
+import { Subject, ExamType, Question } from "./types";
 import { getLocalQuestions } from "./data/jee_dataset";
 import { fetchJEEFromHuggingFace } from "./services/huggingFaceService";
 
-// Configuration Defaults
-const getModelConfig = () => {
-  if (typeof window === 'undefined') return {};
-  try {
-    return JSON.parse(localStorage.getItem('nexus_model_config') || '{}');
-  } catch (e) { return {}; }
-};
-
-const config = getModelConfig();
-const PROVIDER = config.provider || 'google'; 
-const BASE_URL = config.baseUrl || '';
-
-const MODEL_ID = config.modelId || config.genModel || "gemini-2.0-flash"; 
-const VISION_MODEL = config.visionModel || "gemini-2.0-flash"; 
-const ANALYSIS_MODEL = config.analysisModel || "gemini-2.0-flash";
-
-let lastRequestTimestamp = 0;
-const MIN_GLOBAL_REQUEST_INTERVAL = 3000;
-
-const enforceGlobalThrottle = async () => {
-    const now = Date.now();
-    const timeSinceLast = now - lastRequestTimestamp;
-    if (timeSinceLast < MIN_GLOBAL_REQUEST_INTERVAL) {
-        await new Promise(resolve => setTimeout(resolve, MIN_GLOBAL_REQUEST_INTERVAL - timeSinceLast));
-    }
-    lastRequestTimestamp = Date.now();
-};
-
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = error => reject(error);
-  });
-};
-
-const cleanAndParseJSON = (text: string) => {
-  if (!text) return null;
-  let cleanText = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
-  cleanText = cleanText.replace(/\/\/.*$/gm, '');
-  const firstOpenBrace = cleanText.indexOf('{');
-  const firstOpenBracket = cleanText.indexOf('[');
-  let startIdx = -1;
-  if (firstOpenBrace !== -1 && firstOpenBracket !== -1) startIdx = Math.min(firstOpenBrace, firstOpenBracket);
-  else if (firstOpenBrace !== -1) startIdx = firstOpenBrace;
-  else if (firstOpenBracket !== -1) startIdx = firstOpenBracket;
-  if (startIdx === -1) return null;
-  cleanText = cleanText.substring(startIdx);
-  const lastCloseBrace = cleanText.lastIndexOf('}');
-  const lastCloseBracket = cleanText.lastIndexOf(']');
-  const endIdx = Math.max(lastCloseBrace, lastCloseBracket);
-  if (endIdx !== -1) cleanText = cleanText.substring(0, endIdx + 1);
-  try {
-    return JSON.parse(cleanText);
-  } catch (e) {}
-  try {
-    if (cleanText.trim().endsWith(',')) cleanText = cleanText.trim().slice(0, -1);
-    if (!cleanText.trim().endsWith(']')) cleanText += ']';
-    return JSON.parse(cleanText); 
-  } catch (repairError) { return null; }
-};
+// Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
+const MODEL_ID = "gemini-3-pro-preview";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const API_KEY_POOL: string[] = [];
-
-const getAvailableApiKeys = (): string[] => {
-  const keys = [...API_KEY_POOL];
-  const parseEnvList = (envVal: string | undefined) => {
-    if (!envVal) return [];
-    return envVal.split(',').map(k => k.trim()).filter(k => k);
-  };
-  if (typeof window !== 'undefined') {
-      try {
-          const localConfig = JSON.parse(localStorage.getItem('nexus_api_config') || '{}');
-          if (localConfig.geminiApiKey) keys.unshift(...parseEnvList(localConfig.geminiApiKey));
-      } catch(e) {}
-  }
-  if (typeof process !== 'undefined' && process.env) {
-    if (process.env.API_KEY) keys.unshift(...parseEnvList(process.env.API_KEY));
-  }
-  return Array.from(new Set(keys)).filter(k => !!k);
-};
-
-const safeGenerateContent = async (params: any, retries = 2, initialDelay = 5000, keyOffset = 0): Promise<any> => {
-    await enforceGlobalThrottle();
+// Helper to generate content using the SDK following guidelines
+const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
+    // API Key must be obtained exclusively from the environment variable process.env.API_KEY.
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     try {
-        const keys = getAvailableApiKeys();
-        if (keys.length === 0) throw new Error("NO_API_KEYS"); 
-        const activeKey = keys[keyOffset % keys.length];
-        const ai = new GoogleGenAI({ apiKey: activeKey });
-        return await ai.models.generateContent({
+        // MUST use ai.models.generateContent to query GenAI with both the model name and prompt.
+        const response = await ai.models.generateContent({
             model: params.model, 
             contents: params.contents,
             config: params.config
         });
+        return response;
     } catch (e: any) {
-        const isRateLimit = e.message?.includes('429') || e.status === 429 || e.status === 403 || e.message?.includes('Quota exceeded');
-        const isNetworkError = e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError');
-        if (isNetworkError) throw new Error("NETWORK_FAILURE");
-        if (isRateLimit) {
-            if (retries <= 0) throw new Error("QUOTA_EXCEEDED");
-            await delay(initialDelay);
-            return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset + 1);
-        }
-        if (retries > 0) {
-             await delay(initialDelay);
-             return safeGenerateContent(params, retries - 1, initialDelay * 2, keyOffset);
-        }
+        console.error("Gemini API error:", e);
         throw e;
     }
-};
-
-const extractText = (response: any): string => {
-    try {
-        if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
-            return response.candidates[0].content.parts.map((p: any) => p.text).join('') || '';
-        }
-        return response.text || '';
-    } catch (e) { return ''; }
 };
 
 const questionSchema = {
@@ -152,7 +50,7 @@ const questionSchema = {
   }
 };
 
-export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string | Difficulty, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
+export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
   
   const allQuestions: Question[] = [];
   let totalMcqTarget = distribution ? distribution.mcq : Math.ceil(count * 0.8);
@@ -163,43 +61,51 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
   // --- ATTEMPT 1: GOOGLE GEMINI AI ---
   try {
-      console.log(`[AI] Generating questions for ${subject}...`);
-      const prompt = `Create ${count} JEE ${subject} questions for ${type}. Topics: ${topicFocus}. Use LaTeX. Return JSON Array.`;
+      console.log(`[AI] Generating ${count} questions for ${subject}...`);
+      const prompt = `Act as a senior JEE coach. Create ${count} original ${subject} questions for ${type}. Topics: ${topicFocus}. Difficulty: ${difficulty || 'JEE Advanced'}. Use LaTeX for all math formulas. Ensure the JSON strictly follows the response schema.`;
+      
       const response = await safeGenerateContent({
         model: MODEL_ID,
         contents: prompt,
-        config: { responseMimeType: "application/json", responseSchema: questionSchema }
+        config: { 
+          responseMimeType: "application/json", 
+          responseSchema: questionSchema,
+          temperature: 0.7
+        }
       });
-      const data = cleanAndParseJSON(extractText(response));
-      if (data && Array.isArray(data) && data.length > 0) {
-          allQuestions.push(...data.map((q, i) => ({
-              ...q,
-              id: `ai-${Date.now()}-${i}`,
-              subject: q.subject || subject,
-              type: q.options ? 'MCQ' : 'Numerical',
-              markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
-          })));
+      
+      // Accessing text directly from GenerateContentResponse as per guidelines.
+      const text = response.text;
+      if (text) {
+          const data = JSON.parse(text);
+          if (Array.isArray(data)) {
+              allQuestions.push(...data.map((q, i) => ({
+                  ...q,
+                  id: `ai-${Date.now()}-${i}`,
+                  subject: q.subject || subject,
+                  type: q.options ? 'MCQ' : 'Numerical',
+                  markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
+              })));
+          }
       }
   } catch (e) {
-      console.warn("[AI] Failed or Quota hit, switching to Hugging Face Dataset...");
+      console.warn("[AI] Gemini generation failed, reverting to secondary sources.");
   }
 
-  // --- ATTEMPT 2: HUGGING FACE DATASET (If AI failed or returned less) ---
+  // --- ATTEMPT 2: HUGGING FACE DATASET ---
   if (allQuestions.length < count) {
       const needed = count - allQuestions.length;
       try {
-          console.log(`[Dataset] Fetching ${needed} questions from Hugging Face...`);
           const hfQuestions = await fetchJEEFromHuggingFace(subject, needed);
           allQuestions.push(...hfQuestions);
       } catch (e) {
-          console.warn("[Dataset] HF API failed, falling back to Local Cache...");
+          console.warn("[Dataset] HF API failed.");
       }
   }
 
-  // --- ATTEMPT 3: LOCAL CACHE (Total Resilience) ---
+  // --- ATTEMPT 3: LOCAL CACHE ---
   if (allQuestions.length < count) {
       const needed = count - allQuestions.length;
-      console.log(`[Local] Pulling ${needed} questions from internal bank.`);
       const localQs = getLocalQuestions(subject, needed);
       allQuestions.push(...localQs);
   }
@@ -212,20 +118,22 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
-    const response = await safeGenerateContent({ model: MODEL_ID, contents: `Hint for ${subject}: ${statement.substring(0, 300)}...` });
-    return extractText(response) || "Review concepts.";
+    const response = await safeGenerateContent({ 
+      model: MODEL_ID, 
+      contents: `Provide a single-sentence strategic hint for this ${subject} question: ${statement.substring(0, 500)}` 
+    });
+    return response.text || "Focus on fundamental principles.";
   } catch (e) { return "Hint unavailable."; }
 };
 
-export const refineQuestionText = async (text: string): Promise<string> => text;
-
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, Difficulty.Hard, [], config.physics);
-    await delay(2000);
-    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, Difficulty.Hard, [], config.chemistry);
-    await delay(2000);
-    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, Difficulty.Hard, [], config.mathematics);
+    // Sequential generation for better stability
+    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', [], config.physics);
+    await delay(1000);
+    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', [], config.chemistry);
+    await delay(1000);
+    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', [], config.mathematics);
     return { physics, chemistry, mathematics };
   } catch (error) {
     return {
@@ -237,24 +145,45 @@ export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics:
 };
 
 export const parseDocumentToQuestions = async (questionFile: File, solutionFile?: File): Promise<Question[]> => {
-  const qBase64DataUrl = await fileToBase64(questionFile);
-  const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qBase64DataUrl.split(',')[1] } }];
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const qData = await fileToBase64(questionFile);
+  const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qData } }];
+  
   if (solutionFile) {
-    const sBase64DataUrl = await fileToBase64(solutionFile);
-    parts.push({ inlineData: { mimeType: solutionFile.type, data: sBase64DataUrl.split(',')[1] } });
+    const sData = await fileToBase64(solutionFile);
+    parts.push({ inlineData: { mimeType: solutionFile.type, data: sData } });
   }
-  const prompt = `Extract JEE questions as JSON Array. Use LaTeX.`;
+
+  const prompt = `Digitize and structure the JEE questions from these documents. Output a JSON array matching the schema. Use LaTeX for math.`;
+  
   try {
-    const response = await safeGenerateContent({ model: VISION_MODEL, contents: { parts: [...parts, { text: prompt }] }, config: { responseMimeType: "application/json" } });
-    let data = cleanAndParseJSON(extractText(response));
-    if (!Array.isArray(data)) throw new Error("Parsed data is not an array");
+    const response = await safeGenerateContent({ 
+      model: MODEL_ID, 
+      contents: { parts: [...parts, { text: prompt }] }, 
+      config: { responseMimeType: "application/json", responseSchema: questionSchema } 
+    });
+    const text = response.text;
+    if (!text) throw new Error("Parser response empty");
+    const data = JSON.parse(text);
+    if (!Array.isArray(data)) throw new Error("Unexpected data structure");
     return data.map((q, idx) => ({ ...q, id: `parsed-${Date.now()}-${idx}` }));
   } catch (error) { throw error; }
 };
 
 export const getDeepAnalysis = async (result: any) => {
     try {
-        const response = await safeGenerateContent({ model: ANALYSIS_MODEL, contents: `Analyze exam performance: ${JSON.stringify(result).substring(0, 5000)}` });
-        return extractText(response);
-    } catch (e) { return "Analysis currently unavailable."; }
+        const response = await safeGenerateContent({ 
+          model: MODEL_ID, 
+          contents: `Review this JEE performance data and provide a mentorship summary including strong areas and critical improvements: ${JSON.stringify(result).substring(0, 8000)}` 
+        });
+        return response.text;
+    } catch (e) { return "Cognitive analysis is temporarily unavailable."; }
 };

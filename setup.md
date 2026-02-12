@@ -201,4 +201,22 @@ create policy "Admins view all attempts" on daily_attempts for select using (
 
 ### Netlify
 1.  Log in to [Netlify](https://netlify.com).
-2.  Click **"Add new site"** -> **"Import
+2.  Click **"Add new site"** -> **"Import from Git"**.
+3.  Select your GitHub repository.
+4.  **Build Settings**:
+    *   Build Command: `npm run build`
+    *   Publish Directory: `build`
+5.  **Environment Variables**:
+    *   Add `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, and `API_KEY`.
+6.  Click **Deploy**.
+
+---
+
+## 5. First Login
+
+1.  Navigate to your live URL.
+2.  Go to the **Login** page.
+3.  Login with:
+    *   Email: **name@admin.com**
+    *   Password: **admin123**
+4.  Navigate to the **Admin Panel** to configure your API keys and manage other students.
