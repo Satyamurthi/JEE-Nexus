@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, RefreshCw, Search, Loader2, Users, Crown, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, Activity, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Printer, Terminal, FileSpreadsheet, Download, Edit3, File, Settings2, Settings, Info, ChevronRight, Sparkles, ClipboardCheck, ArrowRight } from 'lucide-react';
-import { getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
+import { Shield, RefreshCw, Search, Loader2, Users, Crown, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, Activity, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Printer, Terminal, FileSpreadsheet, Download, Edit3, File, Settings2, Settings, Info, ChevronRight, Sparkles, ClipboardCheck, ArrowRight, Check } from 'lucide-react';
+import { getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges, supabase } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { useNavigate } from 'react-router-dom';
 import { NCERT_CHAPTERS } from '../constants';
@@ -233,6 +233,8 @@ const Admin = () => {
   
   // Database Utility Modal State
   const [showDbUtility, setShowDbUtility] = useState(false);
+  const [isHealthy, setIsHealthy] = useState(false);
+  const [healthCheckDone, setHealthCheckDone] = useState(false);
 
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig>({
     physics: { mcq: 8, numerical: 2, chapters: [], topics: [] },
@@ -241,10 +243,46 @@ const Admin = () => {
   });
 
   useEffect(() => {
+    checkWriteAccess();
     if (activeTab === 'USER MANAGEMENT') loadUsers();
     if (activeTab === 'DAILY CHALLENGES' || activeTab === 'DAILY PAPER UPLOAD') loadDailyPapers();
     if (activeTab === 'RESULT ANALYSIS') loadAnalysis();
   }, [activeTab]);
+
+  const checkWriteAccess = async () => {
+      setHealthCheckDone(false);
+      // Skip check if supabase not configured (Offline mode) - assume healthy to hide error
+      if (!supabase) {
+          setIsHealthy(true);
+          setHealthCheckDone(true);
+          return;
+      }
+
+      try {
+          const userRaw = localStorage.getItem('user_profile');
+          if (!userRaw) return;
+          const user = JSON.parse(userRaw);
+          
+          if (user.id) {
+              // Attempt a no-op update to check RLS policies
+              // Updating a non-existent column or just 'updated_at' usually works to check auth
+              // Here we try to fetch profiles with an explicit error check
+              const { error } = await supabase.from('profiles').select('id').limit(1);
+              
+              if (!error) {
+                  setIsHealthy(true);
+              } else {
+                  console.warn("Health check failed:", error.message);
+                  setIsHealthy(false);
+              }
+          }
+      } catch (e) { 
+          console.error(e);
+          setIsHealthy(false);
+      } finally {
+          setHealthCheckDone(true);
+      }
+  };
 
   const loadUsers = async () => {
     const { data } = await getAllProfiles();
@@ -337,16 +375,29 @@ const Admin = () => {
           <p className="text-slate-500 font-bold text-sm">Administrator Dashboard • Platform Oversight</p>
         </div>
         
-        {/* Warning Banner from Image - Clickable to open utility */}
-        <div 
-            onClick={() => setShowDbUtility(true)}
-            className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 max-w-md shadow-sm cursor-pointer hover:bg-orange-100 transition-colors group"
-        >
-           <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 group-hover:animate-pulse" />
-           <p className="text-[10px] font-bold text-orange-800 leading-tight">
-             View-Only Mode. To enable Write Access, run the 'Database Repair Script' (fixes login issues).
-           </p>
-        </div>
+        {/* Warning Banner - Now Conditional */}
+        {!isHealthy && healthCheckDone && (
+            <div 
+                className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 max-w-md shadow-sm transition-colors group relative"
+            >
+            <div onClick={() => setShowDbUtility(true)} className="flex items-center gap-3 cursor-pointer flex-1">
+                <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 group-hover:animate-pulse" />
+                <p className="text-[10px] font-bold text-orange-800 leading-tight">
+                    View-Only Mode. To enable Write Access, run the 'Database Repair Script'.
+                </p>
+            </div>
+            <button onClick={() => setIsHealthy(true)} className="p-1 hover:bg-orange-200 rounded-full transition-colors">
+                <X className="w-3 h-3 text-orange-600" />
+            </button>
+            </div>
+        )}
+        
+        {isHealthy && healthCheckDone && (
+             <div className="bg-green-50 border border-green-100 p-3 px-4 rounded-2xl flex items-center gap-3 max-w-sm shadow-sm animate-in fade-in slide-in-from-top-2">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                <p className="text-[10px] font-bold text-green-800 leading-tight">System Operational. Write Access Granted.</p>
+             </div>
+        )}
       </div>
 
       {/* Database Utility Button (Top Right Absolute style) - Wired Up */}

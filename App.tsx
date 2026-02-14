@@ -42,8 +42,8 @@ interface ErrorBoundaryState {
 }
 
 // Fix: Corrected NetworkErrorBoundary to properly extend Component with typed props and state
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
     hasError: false
   };
 
