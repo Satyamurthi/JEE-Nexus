@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, RefreshCw, Search, Loader2, Users, Crown, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, Activity, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Printer, Terminal, FileSpreadsheet, Download, Edit3, File, Settings2, Settings, Info, ChevronRight, Sparkles } from 'lucide-react';
+import { Shield, RefreshCw, Search, Loader2, Users, Crown, ShieldCheck, Zap, Trash2, ShieldAlert, Copy, Activity, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Printer, Terminal, FileSpreadsheet, Download, Edit3, File, Settings2, Settings, Info, ChevronRight, Sparkles, ClipboardCheck, ArrowRight } from 'lucide-react';
 import { getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,107 @@ import { NCERT_CHAPTERS } from '../constants';
 import { Subject, ExamType } from '../types';
 import MathText from '../components/MathText';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const REPAIR_SQL = `-- 1. ENABLE CRYPTO EXTENSION
+create extension if not exists pgcrypto;
+
+-- 2. PUBLIC PROFILES TABLE
+create table if not exists public.profiles (
+  id uuid references auth.users on delete cascade not null primary key,
+  email text unique not null,
+  full_name text,
+  role text default 'student' check (role in ('student', 'admin')),
+  status text default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 3. ENABLE RLS
+alter table public.profiles enable row level security;
+
+-- 4. POLICIES (Drop existing to avoid conflicts)
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+create policy "Public profiles are viewable by everyone" on profiles for select using (true);
+
+drop policy if exists "Users can update own profile" on profiles;
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+drop policy if exists "Admins can update all profiles" on profiles;
+create policy "Admins can update all profiles" on profiles for update using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- 5. USER MANAGEMENT TRIGGER
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, role, status)
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- 6. CONTENT TABLES
+create table if not exists public.questions (
+  id uuid default gen_random_uuid() primary key,
+  subject text not null,
+  chapter text,
+  type text,
+  difficulty text,
+  statement text not null,
+  options jsonb,
+  "correctAnswer" text not null,
+  solution text,
+  explanation text,
+  concept text,
+  "markingScheme" jsonb default '{"positive": 4, "negative": 1}',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public.questions enable row level security;
+drop policy if exists "Read questions" on questions;
+create policy "Read questions" on questions for select using (true);
+drop policy if exists "Insert questions" on questions;
+create policy "Insert questions" on questions for insert with check (auth.role() = 'authenticated');
+
+create table if not exists public.daily_challenges (
+  date date primary key,
+  questions jsonb not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public.daily_challenges enable row level security;
+drop policy if exists "Public Read Daily" on daily_challenges;
+create policy "Public Read Daily" on daily_challenges for select using (true);
+drop policy if exists "Admins Manage Daily" on daily_challenges;
+create policy "Admins Manage Daily" on daily_challenges for all using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+create table if not exists public.daily_attempts (
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  date date references public.daily_challenges(date) on delete cascade not null,
+  score integer,
+  total_marks integer,
+  stats jsonb,
+  attempt_data jsonb,
+  submitted_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (user_id, date)
+);
+alter table public.daily_attempts enable row level security;
+drop policy if exists "Users manage own attempts" on daily_attempts;
+create policy "Users manage own attempts" on daily_attempts for all using (auth.uid() = user_id);
+drop policy if exists "Admins view all attempts" on daily_attempts;
+create policy "Admins view all attempts" on daily_attempts for select using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- 7. PROMOTE CURRENT USER TO ADMIN (Run this part only if needed)
+-- UPDATE public.profiles SET role = 'admin', status = 'approved' WHERE email = 'YOUR_EMAIL_HERE';
+`;
 
 interface SubjectConfig {
     mcq: number;
@@ -58,6 +159,57 @@ const SubjectConfigModal = ({ isOpen, onClose, subject, config, onUpdate }: { is
     );
 };
 
+const DatabaseUtilityModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(REPAIR_SQL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-slate-900 rounded-[2rem] w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-white/10">
+                <div className="p-8 border-b border-white/10 flex items-start justify-between bg-slate-900">
+                    <div>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 bg-indigo-500 rounded-lg"><Terminal className="w-5 h-5 text-white" /></div>
+                            <h3 className="text-2xl font-black text-white tracking-tight">Database Repair Utility</h3>
+                        </div>
+                        <p className="text-slate-400 text-sm font-medium">Execute this script in your Supabase SQL Editor to fix permissions and schema.</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X className="text-slate-400 w-6 h-6" /></button>
+                </div>
+                
+                <div className="flex-1 overflow-hidden relative group">
+                    <div className="absolute top-4 right-6 z-10">
+                        <button onClick={handleCopy} className="px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all border border-white/5">
+                            {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copied ? "COPIED TO CLIPBOARD" : "COPY SCRIPT"}
+                        </button>
+                    </div>
+                    <pre className="h-full overflow-auto p-6 bg-[#0f172a] text-emerald-400 font-mono text-xs leading-relaxed custom-scrollbar select-all">
+                        {REPAIR_SQL}
+                    </pre>
+                </div>
+
+                <div className="p-6 bg-slate-900 border-t border-white/10 flex justify-between items-center">
+                    <div className="flex items-center gap-2 text-slate-500 text-[10px] uppercase font-bold tracking-widest">
+                        <Info className="w-3 h-3" />
+                        <span>Requires SQL Editor Access</span>
+                    </div>
+                    <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noreferrer" className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+                        Open Supabase <ArrowRight className="w-3.5 h-3.5" />
+                    </a>
+                </div>
+            </motion.div>
+        </div>
+    );
+};
+
 const Admin = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('DAILY PAPER UPLOAD');
@@ -78,6 +230,9 @@ const Admin = () => {
   const [parsedQuestions, setParsedQuestions] = useState<any[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeConfigSubject, setActiveConfigSubject] = useState<string | null>(null);
+  
+  // Database Utility Modal State
+  const [showDbUtility, setShowDbUtility] = useState(false);
 
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig>({
     physics: { mcq: 8, numerical: 2, chapters: [], topics: [] },
@@ -167,6 +322,10 @@ const Admin = () => {
                 onUpdate={(newCfg) => setGenerationConfig(prev => ({ ...prev, [activeConfigSubject.toLowerCase() as keyof GenerationConfig]: newCfg }))}
               />
           )}
+          {/* Database Utility Modal */}
+          {showDbUtility && (
+              <DatabaseUtilityModal isOpen={showDbUtility} onClose={() => setShowDbUtility(false)} />
+          )}
       </AnimatePresence>
 
       {/* Header Info Banner */}
@@ -178,18 +337,24 @@ const Admin = () => {
           <p className="text-slate-500 font-bold text-sm">Administrator Dashboard • Platform Oversight</p>
         </div>
         
-        {/* Warning Banner from Image */}
-        <div className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 max-w-md shadow-sm">
-           <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
+        {/* Warning Banner from Image - Clickable to open utility */}
+        <div 
+            onClick={() => setShowDbUtility(true)}
+            className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 max-w-md shadow-sm cursor-pointer hover:bg-orange-100 transition-colors group"
+        >
+           <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 group-hover:animate-pulse" />
            <p className="text-[10px] font-bold text-orange-800 leading-tight">
              View-Only Mode. To enable Write Access, run the 'Database Repair Script' (fixes login issues).
            </p>
         </div>
       </div>
 
-      {/* Database Utility Button (Top Right Absolute style) */}
+      {/* Database Utility Button (Top Right Absolute style) - Wired Up */}
       <div className="absolute top-10 right-10 hidden lg:block">
-         <button className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10">
+         <button 
+            onClick={() => setShowDbUtility(true)}
+            className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
+         >
             <Terminal className="w-4 h-4" /> DATABASE UTILITY
          </button>
       </div>
