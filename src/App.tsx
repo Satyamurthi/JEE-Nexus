@@ -42,11 +42,10 @@ interface ErrorBoundaryState {
 }
 
 // Fix: Corrected NetworkErrorBoundary to properly extend Component with typed props and state
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = {
+    hasError: false
+  };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const msg = error.message?.toLowerCase() || '';

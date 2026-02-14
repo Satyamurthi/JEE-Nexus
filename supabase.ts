@@ -13,8 +13,9 @@ const getEnv = (key: string) => {
 };
 
 // --- CONFIGURATION ---
-const PROVIDED_URL = 'https://phhknvfsvppxxrtzmccx.supabase.co';
-const PROVIDED_KEY = 'sb_publishable_iiPlmfG0VopNWz0R41rL6A_CpgXXveh';
+// Updated credentials as requested
+const PROVIDED_URL = 'https://obneatofbebclbidiszp.supabase.co';
+const PROVIDED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ibmVhdG9mYmViY2xiaWRpc3pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwNDY4MzMsImV4cCI6MjA4NjYyMjgzM30.vKQQmR6WXx5u1dzNjmN7PzDgDAwwyotVILCh_NrFSjs';
 
 const getCustomConfig = () => {
   if (typeof window === 'undefined') return { url: '', key: '' };
