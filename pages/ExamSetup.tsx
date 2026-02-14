@@ -36,31 +36,39 @@ const ExamSetup = () => {
 
       for (const sub of selectedSubjects) {
         setProgress(prev => ({ ...prev, [sub]: 'loading' }));
-        setPreparationLogs(prev => [...prev, `Requesting ${sub} questions...`]);
+        setPreparationLogs(prev => [...prev, `Requesting ${sub} questions from AI...`]);
         
-        const questions = await generateJEEQuestions(
-            sub, 
-            totalPerSubject, 
-            examType,
-            undefined,
-            undefined,
-            undefined,
-            { mcq: questionCounts.mcq, numerical: questionCounts.numerical }
-        );
-        
-        if (questions && questions.length > 0) {
-            allPrepared.push(...questions);
-            const source = questions[0].id.startsWith('ai') ? 'AI engine' : questions[0].id.startsWith('hf') ? 'Hugging Face Dataset' : 'Local Archive';
-            setPreparationLogs(prev => [...prev, `✅ ${sub} prepared via ${source}`]);
-            setProgress(prev => ({ ...prev, [sub]: 'done' }));
-        } else {
-            setPreparationLogs(prev => [...prev, `❌ ${sub} failed completely.`]);
+        try {
+            const questions = await generateJEEQuestions(
+                sub, 
+                totalPerSubject, 
+                examType,
+                undefined,
+                undefined,
+                undefined,
+                { mcq: questionCounts.mcq, numerical: questionCounts.numerical }
+            );
+            
+            if (questions && questions.length > 0) {
+                allPrepared.push(...questions);
+                setPreparationLogs(prev => [...prev, `✅ ${sub} generated successfully.`]);
+                setProgress(prev => ({ ...prev, [sub]: 'done' }));
+            } else {
+                throw new Error("Received empty dataset from AI.");
+            }
+        } catch (subErr: any) {
+            console.error(subErr);
+            setPreparationLogs(prev => [...prev, `❌ ${sub} failed: ${subErr.message}`]);
             setProgress(prev => ({ ...prev, [sub]: 'error' }));
         }
       }
       
-      setPreparedQuestions(allPrepared);
-      setPreparationLogs(prev => [...prev, "Paper Synthesis Complete."]);
+      if (allPrepared.length > 0) {
+          setPreparedQuestions(allPrepared);
+          setPreparationLogs(prev => [...prev, "Paper Synthesis Complete."]);
+      } else {
+          setPreparationLogs(prev => [...prev, "Paper Generation Failed. Please check API Quota."]);
+      }
     } catch (err: any) {
       console.error(err);
       setPreparationLogs(prev => [...prev, `Critical Error: ${err.message}`]);
@@ -93,7 +101,7 @@ const ExamSetup = () => {
     <div className="max-w-6xl mx-auto space-y-10 pb-12">
       <div className="text-center space-y-4">
         <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight">Paper Configuration</h1>
-        <p className="text-slate-500 text-lg font-medium">Hybrid engine: AI + Hugging Face Datasets + Local Cache.</p>
+        <p className="text-slate-500 text-lg font-medium">Powered by Multi-Key Gemini AI Engine.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -206,7 +214,7 @@ const ExamSetup = () => {
                     <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} onClick={preparePaper} disabled={isPreparing || selectedSubjects.length === 0}
                     className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xl shadow-2xl flex items-center justify-center gap-4 disabled:opacity-50">
                     {isPreparing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Atom className="w-6 h-6 text-fuchsia-400" />}
-                    {isPreparing ? "Initializing..." : "Generate Paper"}
+                    {isPreparing ? "Generating..." : "Generate Paper"}
                     </motion.button>
                 ) : (
                     <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} onClick={launchExam}
