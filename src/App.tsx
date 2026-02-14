@@ -1,5 +1,6 @@
 import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+// Fixed: Removed 'Layout' as it is not a valid export from lucide-react
 import { LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MENU_ITEMS, APP_NAME } from './constants';
@@ -27,9 +28,11 @@ interface ErrorBoundaryState {
 }
 
 // Fix: Corrected NetworkErrorBoundary to properly extend Component with typed props and state
-// Use property initializer for state to avoid constructor-related TS issues in some environments
 class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     const msg = error.message?.toLowerCase() || '';
@@ -109,7 +112,7 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
   const profile = JSON.parse(localStorage.getItem('user_profile') || '{}');
 
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut().catch(() => {});
+    if (supabase) await supabase.auth.signOut();
     localStorage.removeItem('user_profile');
     navigate('/login');
   };
