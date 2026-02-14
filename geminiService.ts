@@ -1,31 +1,76 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Subject, ExamType, Question } from "./types";
 import { getLocalQuestions } from "./data/jee_dataset";
-import { fetchJEEFromHuggingFace } from "./services/huggingFaceService";
 
 // Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
 const MODEL_ID = "gemini-3-pro-preview";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper to generate content using the SDK following guidelines
-const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
-    // API Key must be obtained exclusively from the environment variable process.env.API_KEY.
-    // Use directly as per instructions.
-    try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        // MUST use ai.models.generateContent to query GenAI with both the model name and prompt.
-        const response = await ai.models.generateContent({
-            model: params.model, 
-            contents: params.contents,
-            config: params.config
-        });
-        return response;
-    } catch (e: any) {
-        // Log the specific error but don't let a generic "Failed to fetch" kill the user experience
-        console.warn("Gemini API request failed:", e.message || e);
-        throw e;
+// --- MULTI-KEY MANAGEMENT SYSTEM ---
+const getAvailableKeys = (): string[] => {
+    const keys: string[] = [];
+    
+    // 1. Check primary key (can be single or comma-separated)
+    if (process.env.API_KEY) {
+        if (process.env.API_KEY.includes(',')) {
+            keys.push(...process.env.API_KEY.split(',').map(k => k.trim()).filter(k => k));
+        } else {
+            keys.push(process.env.API_KEY);
+        }
     }
+
+    // 2. Check auxiliary keys (API_KEY_1 to API_KEY_10)
+    for (let i = 1; i <= 10; i++) {
+        const k = process.env[`API_KEY_${i}`];
+        if (k) keys.push(k);
+    }
+
+    // Remove duplicates
+    return Array.from(new Set(keys));
+};
+
+const API_KEYS = getAvailableKeys();
+
+// Helper to generate content with Key Rotation and Retry logic
+const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
+    if (API_KEYS.length === 0) {
+        throw new Error("No API Keys configured. Please set API_KEY in environment variables.");
+    }
+
+    let lastError: any = null;
+    
+    // Try keys in a random order to distribute load initially, or sequential?
+    // Sequential ensures we exhaust one key before moving, but random is better for avoiding 'thundering herd' on one key.
+    // Let's copy the array and shuffle it for this request.
+    const shuffledKeys = [...API_KEYS].sort(() => 0.5 - Math.random());
+
+    for (const key of shuffledKeys) {
+        try {
+            const ai = new GoogleGenAI({ apiKey: key });
+            const response = await ai.models.generateContent({
+                model: params.model, 
+                contents: params.contents,
+                config: params.config
+            });
+            return response; // Success, return immediately
+        } catch (e: any) {
+            lastError = e;
+            const msg = e.message || e.toString();
+            
+            // Check for specific errors where rotation makes sense (429, 500, Quota)
+            // If it's a structural error (400), rotation won't help, but for robustness we try next anyway unless list exhausted.
+            console.warn(`[Gemini] Key ending in ...${key.slice(-4)} failed: ${msg}. Switching keys...`);
+            
+            // Short delay before retrying with next key to prevent tight loops
+            await delay(500); 
+        }
+    }
+
+    // If we run out of keys
+    console.error("[Gemini] All API keys exhausted or failed.");
+    throw lastError || new Error("All API keys failed.");
 };
 
 const questionSchema = {
@@ -61,9 +106,9 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
   const isFullSyllabus = !chapters || chapters.length === 0;
   let topicFocus = isFullSyllabus ? "Full Syllabus" : `Chapters: ${chapters.join(', ')}`;
 
-  // --- ATTEMPT 1: GOOGLE GEMINI AI ---
+  // --- ATTEMPT 1: MULTI-KEY GOOGLE GEMINI AI ---
   try {
-      console.log(`[AI] Generating ${count} questions for ${subject}...`);
+      console.log(`[AI] Generating ${count} questions for ${subject} using Multi-Key Engine...`);
       const prompt = `Act as a senior JEE coach. Create ${count} original ${subject} questions for ${type}. Topics: ${topicFocus}. Difficulty: ${difficulty || 'JEE Advanced'}. Use LaTeX for all math formulas. Ensure the JSON strictly follows the response schema.`;
       
       const response = await safeGenerateContent({
@@ -76,7 +121,6 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
         }
       });
       
-      // Accessing text directly from GenerateContentResponse as per guidelines.
       const text = response.text;
       if (text) {
           try {
@@ -91,29 +135,17 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
                   })));
               }
           } catch (parseErr) {
-              console.warn("[AI] Failed to parse JSON response, falling back.");
+              console.warn("[AI] Failed to parse JSON response.");
           }
       }
   } catch (e) {
-      console.warn("[AI] Gemini generation failed or blocked, reverting to secondary sources.");
+      console.error("[AI] Gemini generation failed across all available keys.");
   }
 
-  // --- ATTEMPT 2: HUGGING FACE DATASET ---
+  // --- FALLBACK: LOCAL CACHE ONLY (Dataset Removed) ---
   if (allQuestions.length < count) {
       const needed = count - allQuestions.length;
-      try {
-          const hfQuestions = await fetchJEEFromHuggingFace(subject, needed);
-          if (hfQuestions && hfQuestions.length > 0) {
-              allQuestions.push(...hfQuestions);
-          }
-      } catch (e) {
-          console.warn("[Dataset] HF fetch unsuccessful.");
-      }
-  }
-
-  // --- ATTEMPT 3: LOCAL CACHE ---
-  if (allQuestions.length < count) {
-      const needed = count - allQuestions.length;
+      console.log(`[Fallback] Fetching ${needed} from local archive.`);
       const localQs = getLocalQuestions(subject, needed);
       allQuestions.push(...localQs);
   }
@@ -136,11 +168,12 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential generation for better stability
+    // Parallel generation is safer now with multiple keys, but sequential is still more robust against rate limits if keys are few.
+    // We will use sequential to be safe.
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', [], config.physics);
-    await delay(1000);
+    await delay(500); 
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', [], config.chemistry);
-    await delay(1000);
+    await delay(500);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', [], config.mathematics);
     return { physics, chemistry, mathematics };
   } catch (error) {

@@ -1,3 +1,4 @@
+
 # JEE Nexus AI - Comprehensive Setup & Deployment Guide
 
 This guide provides step-by-step instructions to set up **JEE Nexus AI**, a full-stack examination platform featuring Google Gemini AI for question generation and Supabase for backend data persistence.
@@ -249,11 +250,20 @@ Create a file named `.env` in the root directory. Add the following keys:
 REACT_APP_SUPABASE_URL=your_project_url
 REACT_APP_SUPABASE_ANON_KEY=your_anon_public_key
 
-# Google Gemini AI (Get from Google AI Studio)
-API_KEY=your_gemini_api_key
+# Google Gemini AI - Multi-Key Setup
+# To avoid rate limits, you can provide multiple keys separated by commas,
+# OR use indexed variables. The app automatically rotates them.
+API_KEY=primary_key_here,secondary_key_here,tertiary_key_here
+
+# Alternative way to define keys (Optional):
+# API_KEY_1=key_one
+# API_KEY_2=key_two
 ```
 
-*Note: If you are deploying to Vercel/Netlify, you will add these in their respective "Environment Variables" settings UI.*
+**Note on Multi-API Keys:**
+The system is architected to handle high-volume question generation by automatically rotating through available API keys. If one key hits a Rate Limit (429) or Quota error, the system seamlessly switches to the next available key, ensuring uninterrupted exam generation.
+
+*Note: If you are deploying to Vercel/Netlify, add these in their respective "Environment Variables" settings UI.*
 
 ### Step 3.3: Run the App
 ```bash
@@ -278,7 +288,7 @@ The app should open at `http://localhost:3000`.
 ### 3. Generate Questions
 *   Go to **Drill Station** or **Exam Setup**.
 *   Select a subject and click "Generate".
-*   This uses the `API_KEY` to call Google Gemini. If it fails, check your API quota or key validity.
+*   This uses the `API_KEY` pool to call Google Gemini. If it fails, check your API quota or key validity.
 
 ---
 
@@ -290,7 +300,7 @@ The app should open at `http://localhost:3000`.
     *   **Build Command:** `npm run build`
     *   **Output Directory:** `build`
 4.  **Environment Variables:**
-    *   Copy the values from your local `.env` file into the deployment platform's environment variable settings.
+    *   Copy the values from your local `.env` file into the deployment platform's environment variable settings. Ensure you add all your API keys.
 5.  Deploy.
 
 ---
@@ -298,5 +308,6 @@ The app should open at `http://localhost:3000`.
 ## Troubleshooting
 
 *   **"Failed to fetch"**: Usually means the API Key is missing or the Supabase URL is incorrect. Check `.env`.
+*   **"All API keys failed"**: Ensure you have valid keys in your `.env` file and that you haven't exhausted the quota on all of them.
 *   **Login fails**: If the seeded admin login fails, ensure you ran the SQL script *after* enabling Email Auth. You can manually delete the user in Supabase Auth and re-run the seeding SQL block.
 *   **White Screen**: Check the console (`F12`) for errors. Ensure `react-router-dom` matches the version in `package.json`.
