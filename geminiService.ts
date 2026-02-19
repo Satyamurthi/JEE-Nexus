@@ -1,79 +1,56 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Subject, ExamType, Question } from "./types";
+import { getLocalQuestions } from "./data/jee_dataset";
+import { fetchJEEFromHuggingFace } from "./services/huggingFaceService";
 
 // Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
 const MODEL_ID = "gemini-3-pro-preview";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// --- MULTI-KEY MANAGEMENT SYSTEM ---
-// This system rotates keys to bypass the RPM (Requests Per Minute) limits of the free tier.
-const getAvailableKeys = (): string[] => {
-    const keys: string[] = [];
+/**
+ * Utility to extract and load-balance multiple API keys.
+ * Expects process.env.API_KEY to be a single key or a comma-separated list.
+ */
+const getActiveApiKey = (): string => {
+    const rawValue = process.env.API_KEY || '';
+    if (!rawValue) return '';
     
-    // 1. Check primary key (can be single or comma-separated)
-    if (process.env.API_KEY) {
-        if (process.env.API_KEY.includes(',')) {
-            keys.push(...process.env.API_KEY.split(',').map(k => k.trim()).filter(k => k));
-        } else {
-            keys.push(process.env.API_KEY);
-        }
-    }
-
-    // 2. Check auxiliary keys (API_KEY_1 to API_KEY_10)
-    for (let i = 1; i <= 10; i++) {
-        const k = process.env[`API_KEY_${i}`];
-        if (k) keys.push(k);
-    }
-
-    // Remove duplicates
-    return Array.from(new Set(keys));
+    // Split by comma, trim whitespace, and remove empty entries
+    const keys = rawValue.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    
+    if (keys.length === 0) return '';
+    
+    // Load balancing: Randomly select a key from the pool to distribute traffic
+    const randomIndex = Math.floor(Math.random() * keys.length);
+    return keys[randomIndex];
 };
 
-const API_KEYS = getAvailableKeys();
-
-// Helper to generate content with Key Rotation and Retry logic
+// Helper to generate content using the SDK following guidelines
 const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
-    if (API_KEYS.length === 0) {
-        throw new Error("No API Keys configured. Please set API_KEY in environment variables.");
-    }
-
-    let lastError: any = null;
+    const apiKey = getActiveApiKey();
     
-    // Shuffle keys to distribute load evenly across the pool
-    const shuffledKeys = [...API_KEYS].sort(() => 0.5 - Math.random());
-
-    for (const key of shuffledKeys) {
-        try {
-            const ai = new GoogleGenAI({ apiKey: key });
-            const response = await ai.models.generateContent({
-                model: params.model, 
-                contents: params.contents,
-                config: params.config
-            });
-            return response; // Success, return immediately
-        } catch (e: any) {
-            lastError = e;
-            const msg = e.message || e.toString();
-            
-            // Check for specific errors where rotation makes sense (429, 500, Quota)
-            const isRateLimit = msg.includes('429') || msg.includes('Quota') || msg.includes('Resource has been exhausted');
-            
-            if (isRateLimit) {
-                console.warn(`[Gemini] Key ending in ...${key.slice(-4)} exhausted. Rotating to next key...`);
-            } else {
-                console.warn(`[Gemini] Key ending in ...${key.slice(-4)} error: ${msg}. Retrying...`);
-            }
-            
-            // Short delay before retrying with next key to prevent tight loops
-            await delay(500); 
-        }
+    if (!apiKey) {
+        throw new Error("AI Generation Failed: No API Keys configured. Please set API_KEY in environment variables.");
     }
 
-    // If we run out of keys
-    console.error("[Gemini] All API keys exhausted or failed. Please add more keys to 'API_KEY' in .env to increase RPM limits.");
-    throw lastError || new Error("All API keys failed due to Rate Limits or Network issues.");
+    try {
+        // Create a new instance for every call to ensure we use the load-balanced key
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+            model: params.model, 
+            contents: params.contents,
+            config: {
+                ...params.config,
+                // Add a random seed if not provided to increase output variance
+                seed: params.config?.seed ?? Math.floor(Math.random() * 1000000)
+            }
+        });
+        return response;
+    } catch (e: any) {
+        console.warn("Gemini API request failed:", e.message || e);
+        throw e;
+    }
 };
 
 const questionSchema = {
@@ -103,21 +80,23 @@ const questionSchema = {
 export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
   
   const allQuestions: Question[] = [];
+  let totalMcqTarget = distribution ? distribution.mcq : Math.ceil(count * 0.8);
+  let totalNumTarget = distribution ? distribution.numerical : count - totalMcqTarget;
   
   const isFullSyllabus = !chapters || chapters.length === 0;
   let topicFocus = isFullSyllabus ? "Full Syllabus" : `Chapters: ${chapters.join(', ')}`;
-  if (topics && topics.length > 0) topicFocus += `, Topics: ${topics.join(', ')}`;
 
-  // --- ATTEMPT: MULTI-KEY GOOGLE GEMINI AI ONLY ---
+  // --- ATTEMPT 1: GOOGLE GEMINI AI ---
   try {
-      console.log(`[AI] Generating ${count} questions for ${subject} using Multi-Key Engine...`);
-      const prompt = `Act as a senior JEE coach. Create ${count} original ${subject} questions for ${type}. 
-      Focus on: ${topicFocus}. 
-      Difficulty Level: ${difficulty || 'JEE Advanced'}. 
-      Distribution: Approx ${distribution?.mcq || '80%'} MCQs and ${distribution?.numerical || '20%'} Numerical Value Type.
-      Use LaTeX for all math formulas (e.g. $x^2$). 
-      Ensure the JSON strictly follows the response schema. 
-      IMPORTANT: Unique, high-quality questions only.`;
+      console.log(`[AI] Generating ${count} unique questions for ${subject}...`);
+      
+      // Inject unique entropy into the prompt to force the AI to vary its choices
+      const entropy = Math.random().toString(36).substring(7);
+      const prompt = `Act as a senior JEE coach. SessionID: ${entropy}. 
+      Create ${count} ORIGINAL and UNIQUE ${subject} questions for ${type}. 
+      Topics: ${topicFocus}. Difficulty: ${difficulty || 'JEE Advanced'}. 
+      Do NOT repeat questions from previous sessions. Use LaTeX for all math formulas. 
+      Ensure the JSON strictly follows the response schema.`;
       
       const response = await safeGenerateContent({
         model: MODEL_ID,
@@ -125,7 +104,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
         config: { 
           responseMimeType: "application/json", 
           responseSchema: questionSchema,
-          temperature: 0.8 // Slightly higher creativity for unique questions
+          temperature: 0.9 // Higher temperature for more creative/varied generation
         }
       });
       
@@ -136,49 +115,46 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
               if (Array.isArray(data)) {
                   allQuestions.push(...data.map((q: any, i: number) => ({
                       ...q,
-                      id: `ai-${Date.now()}-${i}`,
+                      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                       subject: q.subject || subject,
-                      type: (q.options && q.options.length > 0) ? 'MCQ' : 'Numerical',
-                      markingScheme: q.markingScheme || ((q.options && q.options.length > 0) ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
+                      type: q.options ? 'MCQ' : 'Numerical',
+                      markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
                   })));
               }
           } catch (parseErr) {
-              console.warn("[AI] Failed to parse JSON response.", parseErr);
+              console.warn("[AI] Failed to parse JSON response, falling back.");
           }
       }
-  } catch (e: any) {
-      console.error(`[AI] Generation failed for ${subject}:`, e.message);
-      // We explicitly throw here so the UI knows we failed to generate anything
-      throw new Error(`AI Generation Failed: ${e.message}`);
+  } catch (e) {
+      console.warn("[AI] Gemini generation failed or blocked, reverting to secondary sources.");
+      // If the error is specifically about API keys, throw it so UI can show it
+      if (e.message?.includes("API Keys")) throw e;
   }
 
-  // --- STRICT AI POLICY: No Local Fallback ---
-  if (allQuestions.length === 0) {
-      throw new Error("AI returned 0 questions. The Rate Limit may have been reached across all keys.");
-  }
-
-  // Slice to exact requirements if AI over-generated
-  let finalQuestions = allQuestions;
-  if (distribution) {
-      const mcqs = allQuestions.filter(q => q.type === 'MCQ');
-      const nums = allQuestions.filter(q => q.type === 'Numerical');
-      
-      // If we don't have enough of a specific type, fill with whatever we have to avoid empty set
-      const neededMcq = distribution.mcq;
-      const neededNum = distribution.numerical;
-      
-      finalQuestions = [...mcqs.slice(0, neededMcq), ...nums.slice(0, neededNum)];
-      
-      // If still short, fill from remaining
-      if (finalQuestions.length < count) {
-          const remaining = allQuestions.filter(q => !finalQuestions.includes(q));
-          finalQuestions.push(...remaining.slice(0, count - finalQuestions.length));
+  // --- ATTEMPT 2: HUGGING FACE DATASET ---
+  if (allQuestions.length < count) {
+      const needed = count - allQuestions.length;
+      try {
+          const hfQuestions = await fetchJEEFromHuggingFace(subject, needed);
+          if (hfQuestions && hfQuestions.length > 0) {
+              allQuestions.push(...hfQuestions);
+          }
+      } catch (e) {
+          console.warn("[Dataset] HF fetch unsuccessful.");
       }
-  } else {
-      finalQuestions = allQuestions.slice(0, count);
   }
 
-  return finalQuestions;
+  // --- ATTEMPT 3: LOCAL CACHE ---
+  if (allQuestions.length < count) {
+      const needed = count - allQuestions.length;
+      const localQs = getLocalQuestions(subject, needed);
+      allQuestions.push(...localQs);
+  }
+
+  const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
+  const finalNums = allQuestions.filter(q => q.type === 'Numerical').slice(0, totalNumTarget);
+
+  return [...finalMcqs, ...finalNums];
 };
 
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
@@ -193,19 +169,16 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential generation to avoid hitting concurrency limits if using single key, 
-    // but with Multi-Key, this is safer. Sequential is still more robust for long tasks.
+    // Sequential generation for better stability
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', [], config.physics);
-    await delay(1000); 
+    await delay(500); // Small delay between subjects to avoid simultaneous spikes on the same key pool
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', [], config.chemistry);
-    await delay(1000);
+    await delay(500);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', [], config.mathematics);
-    
     return { physics, chemistry, mathematics };
   } catch (error) {
-    console.error("Daily Paper Generation Failed:", error);
-    // Return empty so Admin UI shows failure instead of fake data
-    return { physics: [], chemistry: [], mathematics: [] };
+    console.error("Full paper generation failed:", error);
+    throw error;
   }
 };
 

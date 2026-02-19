@@ -1,3 +1,4 @@
+
 import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
@@ -6,31 +7,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
 
-// Helper to retry lazy imports if they fail (fixes "Failed to fetch" on network blips)
-const lazyRetry = (componentImport: () => Promise<any>) => {
-    return React.lazy(() => {
-        return componentImport().catch(error => {
-            console.warn("Chunk load failed, retrying...", error);
-            return new Promise((resolve, reject) => {
-                setTimeout(() => {
-                    componentImport().then(resolve).catch(reject);
-                }, 1500);
-            });
-        });
-    });
-};
-
-// Lazy Load Pages with Retry
-const Dashboard = lazyRetry(() => import('./pages/Dashboard'));
-const ExamSetup = lazyRetry(() => import('./pages/ExamSetup'));
-const ExamPortal = lazyRetry(() => import('./pages/ExamPortal'));
-const Analytics = lazyRetry(() => import('./pages/Analytics'));
-const History = lazyRetry(() => import('./pages/History'));
-const Admin = lazyRetry(() => import('./pages/Admin'));
-const Practice = lazyRetry(() => import('./pages/Practice'));
-const Daily = lazyRetry(() => import('./pages/Daily'));
-const Login = lazyRetry(() => import('./pages/Login'));
-const Signup = lazyRetry(() => import('./pages/Signup'));
+// Lazy Load Pages for Performance Optimization
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const ExamSetup = React.lazy(() => import('./pages/ExamSetup'));
+const ExamPortal = React.lazy(() => import('./pages/ExamPortal'));
+const Analytics = React.lazy(() => import('./pages/Analytics'));
+const History = React.lazy(() => import('./pages/History'));
+const Admin = React.lazy(() => import('./pages/Admin'));
+const Practice = React.lazy(() => import('./pages/Practice'));
+const Daily = React.lazy(() => import('./pages/Daily'));
+const Login = React.lazy(() => import('./pages/Login'));
+const Signup = React.lazy(() => import('./pages/Signup'));
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -41,18 +28,12 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fix: Corrected NetworkErrorBoundary to properly extend Component with typed props and state
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = {
-      hasError: false
-    };
-  }
+// Fix: Explicitly using React.Component to resolve TypeScript error about missing setState/props on type 'NetworkErrorBoundary'
+class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
-    const msg = error.message?.toLowerCase() || '';
-    const isNetwork = msg.includes('network') || msg.includes('fetch') || error.name === 'ChunkLoadError';
+    const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
     return { hasError: true, errorType: isNetwork ? 'network' : 'logic' };
   }
 
@@ -68,12 +49,12 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </h2>
           <p className="text-slate-500 text-sm mb-8 max-w-sm leading-relaxed mx-auto font-medium">
             {this.state.errorType === 'network' 
-              ? 'A critical network request failed. This often happens due to unstable connectivity or blocked API endpoints.' 
+              ? 'Your internet connection dropped while loading this module. Reconnect to resume.' 
               : 'A cognitive processing error occurred while initializing this section.'}
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
               <button 
-                onClick={() => this.setState({ hasError: false })}
+                onClick={() => window.location.reload()}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
               >
                 <RefreshCw className="w-4 h-4" />

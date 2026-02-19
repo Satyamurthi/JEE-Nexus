@@ -1,109 +1,222 @@
+# JEE Nexus AI - Setup & Deployment Guide
 
-# JEE Nexus AI - Comprehensive Setup & Deployment Guide
-
-This guide provides step-by-step instructions to set up **JEE Nexus AI**, a full-stack examination platform featuring Google Gemini AI for question generation and Supabase for backend data persistence.
-
----
+This guide covers setting up the project locally, deploying to GitHub/Netlify, and configuring the Supabase backend.
 
 ## 1. Prerequisites
-
-Before you begin, ensure you have the following:
-*   **Node.js** (v18 or higher) installed.
-*   **Git** installed.
-*   **Google Cloud Project** with the **Gemini API** enabled.
-*   A **Supabase** account (Free tier is sufficient).
+- **Node.js** (v18+)
+- **NPM** or **Yarn**
+- A **Google Cloud Project** with Gemini API enabled.
+- A **Supabase** account.
 
 ---
 
-## 2. Backend Setup (Supabase)
+## 2. Local Development
 
-The application relies on Supabase for Authentication, Database, and Real-time data.
-
-### Step 2.1: Create Project
-1.  Log in to [Supabase](https://supabase.com).
-2.  Click **"New Project"**.
-3.  Enter a Name (e.g., `jee-nexus-ai`), Database Password, and Region.
-4.  Wait for the project to initialize.
-
-### Step 2.2: Database Setup (The SQL Script)
-1.  In your Supabase dashboard, go to the **SQL Editor** (icon on the left sidebar).
-2.  Click **"New Query"**.
-3.  **Copy and Paste** the SQL block provided in the project docs (or `pages/Admin.tsx` REPAIR_SQL constant) to set up tables and RLS policies.
-4.  Click **Run**.
-
-### Step 2.3: Auth Configuration
-1.  Go to **Authentication -> Providers** in Supabase sidebar.
-2.  Ensure **Email** is enabled.
-
----
-
-## 3. Local Development Setup
-
-### Step 3.1: Installation
-1.  Clone the repository.
-2.  Install dependencies:
+1.  **Clone/Download** the project files.
+2.  Open a terminal in the project root.
+3.  **Install Dependencies**:
     ```bash
     npm install
     ```
-
-### Step 3.2: Environment Variables (Critical for AI Engine)
-Create a file named `.env` in the root directory.
-
-#### Supabase Configuration
-Get these from Supabase -> Project Settings -> API.
-```env
-REACT_APP_SUPABASE_URL=your_project_url
-REACT_APP_SUPABASE_ANON_KEY=your_anon_public_key
-```
-
-#### Google Gemini AI - Multi-Key Setup
-To handle high-volume question generation without hitting the **Rate Limits (RPM)** of the free tier, this application uses a Multi-Key Rotation System.
-
-**Method 1: Comma-Separated List (Recommended)**
-Add all your API keys in a single variable separated by commas.
-```env
-API_KEY=AIzaSy...Key1,AIzaSy...Key2,AIzaSy...Key3
-```
-
-**Method 2: Indexed Variables**
-Alternatively, define them individually (supported up to 10).
-```env
-API_KEY_1=AIzaSy...Key1
-API_KEY_2=AIzaSy...Key2
-API_KEY_3=AIzaSy...Key3
-```
-
-**How it works:**
-The `geminiService.ts` automatically detects all available keys and creates a pool. If a request fails with a `429 Too Many Requests` or `Quota Exceeded` error, the system seamlessly switches to the next available key and retries the request. This ensures 99.9% uptime for exam generation.
-
-### Step 3.3: Run the App
-```bash
-npm start
-```
-The app should open at `http://localhost:3000`.
+4.  **Environment Setup**:
+    Create a `.env` file in the root (optional, you can also use the Admin Panel to set keys later):
+    ```env
+    REACT_APP_SUPABASE_URL=your_supabase_url
+    REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
+    API_KEY=your_google_gemini_key
+    ```
+5.  **Start the Dev Server**:
+    ```bash
+    npm start
+    ```
+    The app will open at `http://localhost:3000`.
 
 ---
 
-## 4. How to Use & Verify
+## 3. Backend (Supabase) Setup
 
-### 1. Log in as Admin
-*   **Email:** `name@admin.com`
-*   **Password:** `admin123`
-*   Go to the **Admin Panel** to generate Daily Papers or approve new students.
+1.  Create a new project in [Supabase](https://supabase.com).
+2.  Go to the **SQL Editor** and run the following script. This script will create all tables, set up permissions (RLS), and **automatically create your Admin account**.
 
-### 2. Register as a Student
-*   Go to Sign Up.
-*   Create a new account.
-*   **Note:** By default, new accounts are `pending`. You must log out, log in as Admin, go to "User Management", and click the **Checkmark** to approve the new student.
+**Run this entire block at once:**
 
-### 3. Generate Questions
-*   Go to **Drill Station** or **Exam Setup**.
-*   Select a subject and click "Generate".
-*   This uses the `API_KEY` pool. If it fails, ensure your keys are valid and quotas are not exhausted.
+```sql
+-- ==========================================
+-- 1. EXTENSIONS & CORE TABLES
+-- ==========================================
+create extension if not exists pgcrypto;
+
+-- PROFILES TABLE (Extends Auth)
+create table if not exists public.profiles (
+  id uuid references auth.users on delete cascade not null primary key,
+  email text unique not null,
+  full_name text,
+  role text default 'student' check (role in ('student', 'admin')),
+  status text default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 2. ADMIN PROVISIONING (CRITICAL)
+-- ==========================================
+-- This block creates name@admin.com with password admin123
+-- If user already exists, it updates their status to admin.
+
+DO $$
+DECLARE
+  new_user_id UUID := gen_random_uuid();
+BEGIN
+  -- Check if admin exists in auth.users
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
+    INSERT INTO auth.users (
+      instance_id, id, aud, role, email, 
+      encrypted_password, email_confirmed_at, 
+      raw_app_meta_data, raw_user_meta_data, 
+      created_at, updated_at, confirmation_token, 
+      recovery_token
+    )
+    VALUES (
+      '00000000-0000-0000-0000-000000000000',
+      new_user_id,
+      'authenticated',
+      'authenticated',
+      'name@admin.com',
+      crypt('admin123', gen_salt('bf')), -- Generates hashed 'admin123'
+      now(),
+      '{"provider":"email","providers":["email"]}',
+      '{"full_name": "System Admin"}',
+      now(), now(), '', ''
+    );
+  END IF;
+
+  -- Ensure the record exists in public.profiles and set as approved admin
+  INSERT INTO public.profiles (id, email, full_name, role, status)
+  SELECT id, email, 'System Admin', 'admin', 'approved'
+  FROM auth.users WHERE email = 'name@admin.com'
+  ON CONFLICT (id) DO UPDATE 
+  SET role = 'admin', status = 'approved', full_name = 'System Admin';
+
+END $$;
+
+-- ==========================================
+-- 3. PERMISSIONS & TRIGGERS
+-- ==========================================
+alter table public.profiles enable row level security;
+
+-- RESET PROFILE POLICIES
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+create policy "Public profiles are viewable by everyone" on profiles for select using (true);
+
+drop policy if exists "Users can update own profile" on profiles;
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+drop policy if exists "Admins can update all profiles" on profiles;
+create policy "Admins can update all profiles" on profiles for update using (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- AUTO-CREATE PROFILE FUNCTION
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, role, status)
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', 'student', 'pending')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- ==========================================
+-- 4. APPLICATION DATA TABLES
+-- ==========================================
+
+-- QUESTIONS BANK
+create table if not exists public.questions (
+  id uuid default gen_random_uuid() primary key,
+  subject text not null,
+  chapter text,
+  type text check (type in ('MCQ', 'Numerical')),
+  difficulty text,
+  statement text not null,
+  options jsonb, 
+  "correctAnswer" text not null,
+  solution text,
+  explanation text,
+  concept text,
+  "markingScheme" jsonb default '{"positive": 4, "negative": 1}',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public.questions enable row level security;
+create policy "Read questions" on questions for select using (true);
+create policy "Insert questions" on questions for insert with check (true);
+
+-- DAILY CHALLENGES
+create table if not exists public.daily_challenges (
+  date date primary key,
+  questions jsonb not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public.daily_challenges enable row level security;
+create policy "Public Read Daily" on daily_challenges for select using (true);
+create policy "Public Insert Daily" on daily_challenges for insert with check (true);
+create policy "Public Update Daily" on daily_challenges for update using (true);
+
+-- DAILY ATTEMPTS
+create table if not exists public.daily_attempts (
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  date date references public.daily_challenges(date) on delete cascade not null,
+  score integer,
+  total_marks integer,
+  stats jsonb,
+  attempt_data jsonb,
+  submitted_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (user_id, date)
+);
+alter table public.daily_attempts enable row level security;
+create policy "Users can insert own attempts" on daily_attempts for insert with check (auth.uid() = user_id);
+create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
+create policy "Admins view all attempts" on daily_attempts for select using ( 
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+```
+
+3.  **Authentication Settings**:
+    *   Go to **Authentication -> Providers**. Enable Email/Password.
+    *   **Disable "Confirm email"** in Supabase settings if you want to login immediately with `admin123`.
 
 ---
 
-## Troubleshooting
+## 4. Deployment
 
-*   **"AI Generation Failed"**: Ensure you have provided valid API keys in `.env` and that you haven't exhausted the quota on ALL keys. Add more keys to fix this.
-*   **"Failed to fetch"**: Check your network connection and Supabase URL in `.env`.
+### GitHub
+1.  Initialize git: `git init`
+2.  Add files: `git add .`
+3.  Commit: `git commit -m "Initial commit"`
+4.  Push to a new GitHub repository.
+
+### Netlify
+1.  Log in to [Netlify](https://netlify.com).
+2.  Click **"Add new site"** -> **"Import from Git"**.
+3.  Select your GitHub repository.
+4.  **Build Settings**:
+    *   Build Command: `npm run build`
+    *   Publish Directory: `build`
+5.  **Environment Variables**:
+    *   Add `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, and `API_KEY`.
+6.  Click **Deploy**.
+
+---
+
+## 5. First Login
+
+1.  Navigate to your live URL.
+2.  Go to the **Login** page.
+3.  Login with:
+    *   Email: **name@admin.com**
+    *   Password: **admin123**
+4.  Navigate to the **Admin Panel** to configure your API keys and manage other students.
