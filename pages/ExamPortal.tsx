@@ -303,7 +303,7 @@ const ExamPortal = () => {
 
           <footer className="h-auto py-3 sm:py-0 sm:h-28 bg-white border-t border-slate-100 px-4 sm:px-12 flex items-center justify-between shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.02)]">
             <div className="flex gap-2 sm:gap-4">
-              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const s = new Set(markedForReview); const id = currentIdx.toString(); s.has(id) ? s.delete(id) : s.add(id); setMarkedForReview(s); }} className={`px-4 sm:px-8 py-3 sm:py-4 rounded-2xl font-black transition-all flex items-center gap-2 sm:gap-3 border-2 ${markedForReview.has(currentIdx.toString()) ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-slate-700 border-slate-100'}`}>
+              <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const s = new Set(markedForReview); const id = currentIdx.toString(); if (s.has(id)) s.delete(id); else s.add(id); setMarkedForReview(s); }} className={`px-4 sm:px-8 py-3 sm:py-4 rounded-2xl font-black transition-all flex items-center gap-2 sm:gap-3 border-2 ${markedForReview.has(currentIdx.toString()) ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-slate-700 border-slate-100'}`}>
                 <HelpCircle className="w-5 h-5" /> <span className="hidden sm:inline">Mark for Review</span>
               </motion.button>
               <motion.button whileTap={{ scale: 0.95 }} onClick={() => { const r = {...responses}; delete r[currentIdx]; setResponses(r); }} className="px-4 sm:px-8 py-3 sm:py-4 rounded-2xl font-black text-slate-400 bg-white border border-slate-100 hover:text-red-500 hover:bg-red-50 flex items-center gap-2 sm:gap-3"><RotateCcw className="w-5 h-5" /> <span className="hidden sm:inline">Clear</span></motion.button>
