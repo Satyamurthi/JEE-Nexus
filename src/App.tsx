@@ -27,8 +27,8 @@ interface ErrorBoundaryState {
   errorType?: 'network' | 'logic';
 }
 
-// Fix: Explicitly using React.Component to resolve TypeScript error about missing setState/props on type 'NetworkErrorBoundary'
-class NetworkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+// Fix: Use the imported Component class directly to ensure proper TypeScript inference of setState and props
+class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {

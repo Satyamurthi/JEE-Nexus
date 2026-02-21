@@ -9,11 +9,26 @@ const MODEL_ID = "gemini-3-pro-preview";
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Utility to extract and load-balance multiple API keys.
- * Expects process.env.API_KEY to be a single key or a comma-separated list.
+ * Robust environment variable fetcher
+ */
+const getEnv = (key: string): string => {
+    try {
+        // Check standard process.env (CRA/Node)
+        if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key] as string;
+        // Check Vite environment
+        if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) return (import.meta as any).env[key] as string;
+    } catch (e) {}
+    return '';
+};
+
+/**
+ * Extract and load-balance multiple API keys from environment.
+ * Checks for API_KEY, REACT_APP_API_KEY, and VITE_API_KEY.
  */
 const getActiveApiKey = (): string => {
-    const rawValue = process.env.API_KEY || '';
+    // Check all common names used in Netlify/Vite/CRA
+    const rawValue = getEnv('API_KEY') || getEnv('REACT_APP_API_KEY') || getEnv('VITE_API_KEY') || '';
+    
     if (!rawValue) return '';
     
     // Split by comma, trim whitespace, and remove empty entries
@@ -23,7 +38,10 @@ const getActiveApiKey = (): string => {
     
     // Load balancing: Randomly select a key from the pool to distribute traffic
     const randomIndex = Math.floor(Math.random() * keys.length);
-    return keys[randomIndex];
+    const selectedKey = keys[randomIndex];
+    
+    console.log(`[Engine] Balancing load across pool of ${keys.length} keys.`);
+    return selectedKey;
 };
 
 // Helper to generate content using the SDK following guidelines
@@ -31,24 +49,31 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
     const apiKey = getActiveApiKey();
     
     if (!apiKey) {
-        throw new Error("AI Generation Failed: No API Keys configured. Please set API_KEY in environment variables.");
+        throw new Error("AI Generation Failed: No API Keys configured. Please ensure API_KEY is set in your environment (e.g., Netlify variables). If using comma-separated keys, ensure the variable name matches 'API_KEY' or 'REACT_APP_API_KEY'.");
     }
 
     try {
         // Create a new instance for every call to ensure we use the load-balanced key
         const ai = new GoogleGenAI({ apiKey });
+        
+        // Enhance configuration for unique generation
         const response = await ai.models.generateContent({
             model: params.model, 
             contents: params.contents,
             config: {
                 ...params.config,
-                // Add a random seed if not provided to increase output variance
-                seed: params.config?.seed ?? Math.floor(Math.random() * 1000000)
+                systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided.",
+                temperature: 0.95, // High temperature for variety
+                topP: 0.9,
+                seed: params.config?.seed ?? Math.floor(Math.random() * 9999999)
             }
         });
         return response;
     } catch (e: any) {
-        console.warn("Gemini API request failed:", e.message || e);
+        // Catch the specific error mentioned by the user for better debugging
+        if (e.message?.includes("Requested entity was not found")) {
+            console.error("[Engine] Invalid API Key detected in pool.");
+        }
         throw e;
     }
 };
@@ -90,21 +115,23 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
   try {
       console.log(`[AI] Generating ${count} unique questions for ${subject}...`);
       
-      // Inject unique entropy into the prompt to force the AI to vary its choices
-      const entropy = Math.random().toString(36).substring(7);
-      const prompt = `Act as a senior JEE coach. SessionID: ${entropy}. 
-      Create ${count} ORIGINAL and UNIQUE ${subject} questions for ${type}. 
-      Topics: ${topicFocus}. Difficulty: ${difficulty || 'JEE Advanced'}. 
-      Do NOT repeat questions from previous sessions. Use LaTeX for all math formulas. 
-      Ensure the JSON strictly follows the response schema.`;
+      // Multi-layered entropy to force unique generation
+      const sessionEntropy = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+      
+      const prompt = `BatchID: ${sessionEntropy}. 
+      Generate ${count} COMPLETELY UNIQUE and NEVER-BEFORE-SEEN questions for ${subject} (${type} level). 
+      Scope: ${topicFocus}. 
+      Mandatory: Do NOT repeat problems from standard mock tests or previous batches. 
+      Vary the parameters, numerical values, and conceptual combinations. 
+      Use LaTeX for all formulas. 
+      Strict JSON format.`;
       
       const response = await safeGenerateContent({
         model: MODEL_ID,
         contents: prompt,
         config: { 
           responseMimeType: "application/json", 
-          responseSchema: questionSchema,
-          temperature: 0.9 // Higher temperature for more creative/varied generation
+          responseSchema: questionSchema
         }
       });
       
@@ -113,7 +140,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           try {
               const data = JSON.parse(text);
               if (Array.isArray(data)) {
-                  allQuestions.push(...data.map((q: any, i: number) => ({
+                  allQuestions.push(...data.map((q: any) => ({
                       ...q,
                       id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                       subject: q.subject || subject,
@@ -122,13 +149,13 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
                   })));
               }
           } catch (parseErr) {
-              console.warn("[AI] Failed to parse JSON response, falling back.");
+              console.warn("[AI] JSON Parse Failure.");
           }
       }
-  } catch (e) {
-      console.warn("[AI] Gemini generation failed or blocked, reverting to secondary sources.");
-      // If the error is specifically about API keys, throw it so UI can show it
-      if (e.message?.includes("API Keys")) throw e;
+  } catch (e: any) {
+      console.warn("[AI] Gemini failure:", e.message);
+      // Re-throw if it's a configuration error so user sees the message
+      if (e.message?.includes("No API Keys")) throw e;
   }
 
   // --- ATTEMPT 2: HUGGING FACE DATASET ---
@@ -140,7 +167,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
               allQuestions.push(...hfQuestions);
           }
       } catch (e) {
-          console.warn("[Dataset] HF fetch unsuccessful.");
+          console.warn("[Dataset] HF Unavailable.");
       }
   }
 
@@ -169,11 +196,11 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Sequential generation for better stability
+    // Distributed generation with random delays to avoid hitting same-key rate limits simultaneously
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', [], config.physics);
-    await delay(500); // Small delay between subjects to avoid simultaneous spikes on the same key pool
+    await delay(1000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', [], config.chemistry);
-    await delay(500);
+    await delay(1000);
     const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', [], config.mathematics);
     return { physics, chemistry, mathematics };
   } catch (error) {
