@@ -11,37 +11,9 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Robust environment variable fetcher
  */
-const getEnv = (key: string): string => {
-    try {
-        // Check standard process.env (CRA/Node)
-        if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key] as string;
-        // Check Vite environment
-        if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) return (import.meta as any).env[key] as string;
-    } catch (e) {}
-    return '';
-};
-
-/**
- * Extract and load-balance multiple API keys from environment.
- * Checks for API_KEY, REACT_APP_API_KEY, and VITE_API_KEY.
- */
 const getActiveApiKey = (): string => {
-    // Check all common names used in Netlify/Vite/CRA
-    const rawValue = getEnv('API_KEY') || getEnv('REACT_APP_API_KEY') || getEnv('VITE_API_KEY') || '';
-    
-    if (!rawValue) return '';
-    
-    // Split by comma, trim whitespace, and remove empty entries
-    const keys = rawValue.split(',').map(k => k.trim()).filter(k => k.length > 0);
-    
-    if (keys.length === 0) return '';
-    
-    // Load balancing: Randomly select a key from the pool to distribute traffic
-    const randomIndex = Math.floor(Math.random() * keys.length);
-    const selectedKey = keys[randomIndex];
-    
-    console.log(`[Engine] Balancing load across pool of ${keys.length} keys.`);
-    return selectedKey;
+    // Use the platform-provided GEMINI_API_KEY directly as per guidelines
+    return process.env.GEMINI_API_KEY || '';
 };
 
 // Helper to generate content using the SDK following guidelines
@@ -49,7 +21,7 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
     const apiKey = getActiveApiKey();
     
     if (!apiKey) {
-        throw new Error("AI Generation Failed: No API Keys configured. Please ensure API_KEY is set in your environment (e.g., Netlify variables). If using comma-separated keys, ensure the variable name matches 'API_KEY' or 'REACT_APP_API_KEY'.");
+        throw new Error("AI Generation Failed: GEMINI_API_KEY is not configured in the environment.");
     }
 
     try {
