@@ -9,18 +9,34 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Robust environment variable fetcher
  */
-const getActiveApiKey = (): string => {
-    // Use the platform-provided API_KEY directly as per guidelines
-    // Also check VITE_GEMINI_API_KEY for local development fallback
-    return process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+const getActiveApiKey = async (): Promise<string> => {
+    // 1. Check if we have a key in environment (dev mode or injected)
+    let key = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+    
+    // 2. If no key, try to use the AI Studio selection flow
+    if (!key && typeof window !== 'undefined' && (window as any).aistudio) {
+        try {
+            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+            if (!hasKey) {
+                await (window as any).aistudio.openSelectKey();
+            }
+            // After selection, try to read from process.env again (assuming platform injects it)
+            // Or fallback to empty string and let the user retry
+            key = process.env.API_KEY || '';
+        } catch (e) {
+            console.warn("AI Studio key selection failed:", e);
+        }
+    }
+    
+    return key;
 };
 
 // Helper to generate content using the SDK following guidelines
 const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
-    const apiKey = getActiveApiKey();
+    const apiKey = await getActiveApiKey();
     
     if (!apiKey) {
-        throw new Error("AI Generation Failed: API_KEY is not configured in the environment.");
+        throw new Error("AI Generation Failed: API_KEY is not configured. Please select an API Key.");
     }
 
     try {
@@ -42,8 +58,17 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
         return response;
     } catch (e: any) {
         // Catch the specific error mentioned by the user for better debugging
-        if (e.message?.includes("Requested entity was not found")) {
-            console.error("[Engine] Invalid API Key detected in pool.");
+        if (e.message?.includes("Requested entity was not found") || e.message?.includes("API key not valid")) {
+            console.error("[Engine] Invalid API Key detected. Prompting user.");
+            if (typeof window !== 'undefined' && (window as any).aistudio) {
+                try {
+                    await (window as any).aistudio.openSelectKey();
+                    // Throw a specific error to tell the UI to retry
+                    throw new Error("API Key updated. Please retry generation.");
+                } catch (err) {
+                    // Ignore selection error
+                }
+            }
         }
         throw e;
     }

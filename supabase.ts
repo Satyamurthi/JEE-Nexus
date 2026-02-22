@@ -15,8 +15,8 @@ const getEnv = (key: string) => {
 };
 
 // --- CONFIGURATION ---
-const PROVIDED_URL = 'https://phhknvfsvppxxrtzmccx.supabase.co';
-const PROVIDED_KEY = 'sb_publishable_iiPlmfG0VopNWz0R41rL6A_CpgXXveh';
+const PROVIDED_URL = '';
+const PROVIDED_KEY = '';
 
 const getCustomConfig = () => {
   if (typeof window === 'undefined') return { url: '', key: '' };

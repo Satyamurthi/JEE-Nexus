@@ -176,7 +176,10 @@
            console.log('DOM Content Loaded - Core components ready');
         });
     </script>
-    <script type="module" src="index.tsx"></script>
-<script type="module" src="/index.tsx"></script>
+    <script>
+        // Polyfill process.env for AI Studio runtime injection
+        window.process = window.process || { env: {} };
+    </script>
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>
