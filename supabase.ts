@@ -15,8 +15,8 @@ const getEnv = (key: string) => {
 };
 
 // --- CONFIGURATION ---
-const PROVIDED_URL = '';
-const PROVIDED_KEY = '';
+const PROVIDED_URL = process.env.SUPABASE_URL || '';
+const PROVIDED_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 const getCustomConfig = () => {
   if (typeof window === 'undefined') return { url: '', key: '' };

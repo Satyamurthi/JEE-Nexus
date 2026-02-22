@@ -19,6 +19,10 @@ const getActiveApiKey = async (): Promise<string> => {
             const hasKey = await (window as any).aistudio.hasSelectedApiKey();
             if (!hasKey) {
                 await (window as any).aistudio.openSelectKey();
+                // Force reload to ensure the new key is injected into the environment
+                console.log("API Key selected. Reloading...");
+                window.location.reload();
+                return '';
             }
             // After selection, try to read from process.env again (assuming platform injects it)
             // Or fallback to empty string and let the user retry
