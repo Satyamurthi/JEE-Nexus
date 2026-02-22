@@ -10,8 +10,9 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * Robust environment variable fetcher
  */
 const getActiveApiKey = (): string => {
-    // Use the platform-provided GEMINI_API_KEY directly as per guidelines
-    return process.env.GEMINI_API_KEY || '';
+    // Use the platform-provided API_KEY directly as per guidelines
+    // Also check VITE_GEMINI_API_KEY for local development fallback
+    return process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
 };
 
 // Helper to generate content using the SDK following guidelines
@@ -19,7 +20,7 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
     const apiKey = getActiveApiKey();
     
     if (!apiKey) {
-        throw new Error("AI Generation Failed: GEMINI_API_KEY is not configured in the environment.");
+        throw new Error("AI Generation Failed: API_KEY is not configured in the environment.");
     }
 
     try {

@@ -5,8 +5,10 @@ const getEnv = (key: string) => {
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key];
     }
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
-      return (import.meta as any).env[key];
+    // Check for VITE_ prefixed variables in import.meta.env
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+        if ((import.meta as any).env[key]) return (import.meta as any).env[key];
+        if ((import.meta as any).env[`VITE_${key}`]) return (import.meta as any).env[`VITE_${key}`];
     }
   } catch (e) {}
   return '';
