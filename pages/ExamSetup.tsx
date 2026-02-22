@@ -24,7 +24,7 @@ const ExamSetup = () => {
   const preparePaper = async () => {
     setIsPreparing(true);
     setPreparedQuestions([]);
-    setPreparationLogs(["Initializing Hybrid Engine..."]);
+    setPreparationLogs(["Initializing AI Engine..."]);
     
     const resetProgress = { ...progress };
     selectedSubjects.forEach(s => resetProgress[s] = 'pending');
@@ -93,7 +93,7 @@ const ExamSetup = () => {
     <div className="max-w-6xl mx-auto space-y-10 pb-12">
       <div className="text-center space-y-4">
         <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight">Paper Configuration</h1>
-        <p className="text-slate-500 text-lg font-medium">Hybrid engine: AI + Hugging Face Datasets + Local Cache.</p>
+        <p className="text-slate-500 text-lg font-medium">Powered by Gemini AI.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

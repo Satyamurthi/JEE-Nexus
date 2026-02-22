@@ -1,7 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Subject, ExamType, Question } from "./types";
-import { getLocalQuestions } from "./data/jee_dataset";
-import { fetchJEEFromHuggingFace } from "./services/huggingFaceService";
 
 // Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
 const MODEL_ID = "gemini-3-pro-preview";
@@ -125,31 +123,8 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
           }
       }
   } catch (e: any) {
-      console.warn("[AI] Gemini failure:", e.message);
-      // Allow fallback to local generator even if API key is missing
-      if (e.message?.includes("No API Keys")) {
-          console.warn("[AI] API Key missing. Proceeding to fallback generators.");
-      }
-  }
-
-  // --- ATTEMPT 2: HUGGING FACE DATASET ---
-  if (allQuestions.length < count) {
-      const needed = count - allQuestions.length;
-      try {
-          const hfQuestions = await fetchJEEFromHuggingFace(subject, needed);
-          if (hfQuestions && hfQuestions.length > 0) {
-              allQuestions.push(...hfQuestions);
-          }
-      } catch (e) {
-          console.warn("[Dataset] HF Unavailable.");
-      }
-  }
-
-  // --- ATTEMPT 3: LOCAL CACHE ---
-  if (allQuestions.length < count) {
-      const needed = count - allQuestions.length;
-      const localQs = getLocalQuestions(subject, needed);
-      allQuestions.push(...localQs);
+      console.error("[AI] Gemini failure:", e.message);
+      throw e; // Fail fast if AI fails, as we are AI-only now
   }
 
   const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
