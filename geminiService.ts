@@ -2,83 +2,111 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Subject, ExamType, Question } from "./types";
 
 // Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
-const MODEL_ID = "gemini-3-pro-preview";
+const PRIMARY_MODEL = "gemini-3.1-pro-preview";
+const FALLBACK_MODEL = "gemini-3-flash-preview"; // Fallback for rate limits
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Robust environment variable fetcher
- */
-const getActiveApiKey = async (): Promise<string> => {
-    // 1. Check if we have a key in environment (dev mode or injected)
-    let key = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+// Global key management
+let keyPool: string[] = [];
+let currentKeyIndex = 0;
+
+const initializeKeyPool = async () => {
+    if (keyPool.length > 0) return;
+
+    // 1. Get raw string from env
+    let rawKeys = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
     
     // 2. If no key, try to use the AI Studio selection flow
-    if (!key && typeof window !== 'undefined' && (window as any).aistudio) {
+    if (!rawKeys && typeof window !== 'undefined' && (window as any).aistudio) {
         try {
             const hasKey = await (window as any).aistudio.hasSelectedApiKey();
             if (!hasKey) {
                 await (window as any).aistudio.openSelectKey();
-                // Force reload to ensure the new key is injected into the environment
                 console.log("API Key selected. Reloading...");
                 window.location.reload();
-                return '';
+                return;
             }
-            // After selection, try to read from process.env again (assuming platform injects it)
-            // Or fallback to empty string and let the user retry
-            key = process.env.API_KEY || '';
+            // Try to read again, though likely requires reload
+            rawKeys = process.env.API_KEY || '';
         } catch (e) {
             console.warn("AI Studio key selection failed:", e);
         }
     }
+
+    // 3. Parse comma-separated keys
+    if (rawKeys) {
+        keyPool = rawKeys.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    }
+};
+
+const getNextKey = async (): Promise<string> => {
+    await initializeKeyPool();
+    if (keyPool.length === 0) return '';
     
+    const key = keyPool[currentKeyIndex];
+    currentKeyIndex = (currentKeyIndex + 1) % keyPool.length;
     return key;
 };
 
 // Helper to generate content using the SDK following guidelines
 const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
-    const apiKey = await getActiveApiKey();
+    await initializeKeyPool();
     
-    if (!apiKey) {
+    if (keyPool.length === 0) {
         throw new Error("AI Generation Failed: API_KEY is not configured. Please select an API Key.");
     }
 
-    // Debug log to verify key presence (do not log full key)
-    console.log(`[AI] Using API Key: ${apiKey.substring(0, 8)}...`);
+    let lastError: any;
+    // Try up to 3 times with different keys (or same key if pool is small)
+    const maxRetries = Math.max(keyPool.length, 3); 
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const apiKey = await getNextKey();
+        console.log(`[AI] Attempt ${attempt + 1}/${maxRetries} using Key: ${apiKey.substring(0, 8)}...`);
 
-    try {
-        // Create a new instance for every call to ensure we use the load-balanced key
-        const ai = new GoogleGenAI({ apiKey });
-        
-        // Enhance configuration for unique generation
-        const response = await ai.models.generateContent({
-            model: params.model, 
-            contents: params.contents,
-            config: {
-                ...params.config,
-                systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided. The questions must be correctly formed and sufficient for JEE Advanced level.",
-                temperature: 0.95, // High temperature for variety
-                topP: 0.9,
-                seed: params.config?.seed ?? Math.floor(Math.random() * 9999999)
-            }
-        });
-        return response;
-    } catch (e: any) {
-        // Catch the specific error mentioned by the user for better debugging
-        if (e.message?.includes("Requested entity was not found") || e.message?.includes("API key not valid")) {
-            console.error("[Engine] Invalid API Key detected. Prompting user.");
-            if (typeof window !== 'undefined' && (window as any).aistudio) {
-                try {
-                    await (window as any).aistudio.openSelectKey();
-                    // Throw a specific error to tell the UI to retry
-                    throw new Error("API Key updated. Please retry generation.");
-                } catch (err) {
-                    // Ignore selection error
+        try {
+            const ai = new GoogleGenAI({ apiKey });
+            
+            // Determine model - use fallback if we've failed before on 429
+            const modelToUse = (attempt > 0 && lastError?.status === 429) ? FALLBACK_MODEL : params.model;
+            if (modelToUse !== params.model) console.log(`[AI] Switching to fallback model: ${modelToUse}`);
+
+            const response = await ai.models.generateContent({
+                model: modelToUse, 
+                contents: params.contents,
+                config: {
+                    ...params.config,
+                    systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided. The questions must be correctly formed and sufficient for JEE Advanced level.",
+                    temperature: 0.95,
+                    topP: 0.9,
+                    seed: params.config?.seed ?? Math.floor(Math.random() * 9999999)
                 }
+            });
+            return response;
+        } catch (e: any) {
+            lastError = e;
+            
+            // Handle specific errors
+            if (e.message?.includes("API key not valid") || e.status === 400) {
+                console.warn(`[AI] Invalid Key: ${apiKey.substring(0, 8)}... rotating.`);
+                continue; // Try next key
             }
+            
+            if (e.status === 429 || e.message?.includes("quota") || e.message?.includes("RESOURCE_EXHAUSTED")) {
+                console.warn(`[AI] Rate Limit hit on Key: ${apiKey.substring(0, 8)}... rotating.`);
+                await delay(1000); // Wait a bit before retry
+                continue; // Try next key
+            }
+
+            // For other errors, throw immediately
+            throw e;
         }
-        throw e;
     }
+    
+    // If we exhausted all retries
+    console.error("[AI] All keys/retries exhausted.");
+    throw lastError;
 };
 
 const questionSchema = {
@@ -130,7 +158,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       Strict JSON format.`;
       
       const response = await safeGenerateContent({
-        model: MODEL_ID,
+        model: PRIMARY_MODEL,
         contents: prompt,
         config: { 
           responseMimeType: "application/json", 
@@ -169,7 +197,7 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
     const response = await safeGenerateContent({ 
-      model: MODEL_ID, 
+      model: PRIMARY_MODEL, 
       contents: `Provide a single-sentence strategic hint for this ${subject} question: ${statement.substring(0, 500)}` 
     });
     return response.text || "Focus on fundamental principles.";
@@ -213,7 +241,7 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
     const prompt = `Digitize and structure the JEE questions from these documents. Output a JSON array matching the schema. Use LaTeX for math.`;
     
     const response = await safeGenerateContent({ 
-      model: MODEL_ID, 
+      model: PRIMARY_MODEL, 
       contents: { parts: [...parts, { text: prompt }] }, 
       config: { responseMimeType: "application/json", responseSchema: questionSchema } 
     });
@@ -231,7 +259,7 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 export const getDeepAnalysis = async (result: any) => {
     try {
         const response = await safeGenerateContent({ 
-          model: MODEL_ID, 
+          model: PRIMARY_MODEL, 
           contents: `Review this JEE performance data and provide a mentorship summary including strong areas and critical improvements: ${JSON.stringify(result).substring(0, 8000)}` 
         });
         return response.text || "Analysis complete. Keep practicing consistent drills.";
