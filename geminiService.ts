@@ -43,6 +43,9 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
         throw new Error("AI Generation Failed: API_KEY is not configured. Please select an API Key.");
     }
 
+    // Debug log to verify key presence (do not log full key)
+    console.log(`[AI] Using API Key: ${apiKey.substring(0, 8)}...`);
+
     try {
         // Create a new instance for every call to ensure we use the load-balanced key
         const ai = new GoogleGenAI({ apiKey });
