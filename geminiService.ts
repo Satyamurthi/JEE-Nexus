@@ -34,7 +34,7 @@ const safeGenerateContent = async (params: { model: string, contents: any, confi
             contents: params.contents,
             config: {
                 ...params.config,
-                systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided.",
+                systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided. The questions must be correctly formed and sufficient for JEE Advanced level.",
                 temperature: 0.95, // High temperature for variety
                 topP: 0.9,
                 seed: params.config?.seed ?? Math.floor(Math.random() * 9999999)
@@ -126,8 +126,10 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       }
   } catch (e: any) {
       console.warn("[AI] Gemini failure:", e.message);
-      // Re-throw if it's a configuration error so user sees the message
-      if (e.message?.includes("No API Keys")) throw e;
+      // Allow fallback to local generator even if API key is missing
+      if (e.message?.includes("No API Keys")) {
+          console.warn("[AI] API Key missing. Proceeding to fallback generators.");
+      }
   }
 
   // --- ATTEMPT 2: HUGGING FACE DATASET ---
