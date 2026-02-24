@@ -8,7 +8,7 @@ import { supabase } from './supabase';
 
 // Lazy Load Pages for Performance Optimization
 import Dashboard from './pages/Dashboard';
-const ExamSetup = lazy(() => import('./pages/ExamSetup'));
+const ExamSetup = lazy(() => import('./pages/ExamSetup.tsx'));
 const ExamPortal = lazy(() => import('./pages/ExamPortal'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const History = lazy(() => import('./pages/History'));
