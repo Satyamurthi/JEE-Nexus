@@ -2,14 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Award, Target, TrendingUp, BookOpen, ChevronRight, Brain, Flame, Activity, Zap, Layers, Crown } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 const StatCard = ({ Icon, label, value, subValue, gradient, delay }: any) => (
-  <motion.div 
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay }}
-    whileHover={{ y: -8, scale: 1.02 }}
+  <div 
     className={`p-8 rounded-[2.5rem] shadow-2xl text-white relative overflow-hidden group ${gradient}`}
   >
     <div className="absolute top-0 right-0 p-8 opacity-20 group-hover:scale-150 transition-transform duration-700 rotate-12">
@@ -27,7 +22,7 @@ const StatCard = ({ Icon, label, value, subValue, gradient, delay }: any) => (
            {subValue}
         </div>
     </div>
-  </motion.div>
+  </div>
 );
 
 const Dashboard = () => {
@@ -221,9 +216,7 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Large Action Card: Exam Simulator */}
-        <motion.div 
-          whileHover={{ y: -4, scale: 1.01 }}
-          whileTap={{ scale: 0.98 }}
+        <div 
           className="lg:col-span-8 bg-slate-900 p-12 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group cursor-pointer flex flex-col justify-between min-h-[400px]"
           onClick={() => navigate('/exam-setup')}
         >
@@ -249,14 +242,12 @@ const Dashboard = () => {
              </div>
              <span className="font-black text-lg tracking-wide group-hover:translate-x-2 transition-transform">Initialize Protocol</span>
           </div>
-        </motion.div>
+        </div>
 
         {/* Vertical Stack */}
         <div className="lg:col-span-4 flex flex-col gap-8">
             {/* Practice Card */}
-            <motion.div 
-            whileHover={{ y: -4 }}
-            whileTap={{ scale: 0.98 }}
+            <div 
             className="flex-1 bg-white p-10 rounded-[3rem] shadow-premium border border-slate-100 group cursor-pointer relative overflow-hidden"
             onClick={() => navigate('/practice')}
             >
@@ -268,12 +259,10 @@ const Dashboard = () => {
                 </div>
                 <h2 className="text-3xl font-black text-slate-900 mb-2">Drill Mode</h2>
                 <p className="text-slate-500 font-medium leading-relaxed">Target specific chapters for rapid-fire refinement.</p>
-            </motion.div>
+            </div>
 
             {/* Daily Card */}
-            <motion.div 
-            whileHover={{ y: -4 }}
-            whileTap={{ scale: 0.98 }}
+            <div 
             className="flex-1 bg-gradient-to-br from-emerald-50 to-teal-50 p-10 rounded-[3rem] border border-emerald-100 group cursor-pointer relative overflow-hidden"
             onClick={() => navigate('/daily')}
             >
@@ -285,7 +274,7 @@ const Dashboard = () => {
                 </div>
                 <h2 className="text-3xl font-black text-emerald-900 mb-2">Daily Challenge</h2>
                 <p className="text-emerald-700/80 font-medium">Compete globally.</p>
-            </motion.div>
+            </div>
         </div>
       </div>
 

@@ -91,8 +91,8 @@ function checkValidServiceWorker(swUrl: string, config?: any) {
         registerValidSW(swUrl, config);
       }
     })
-    .catch(() => {
-      console.log('No internet connection found. App is running in offline mode.');
+    .catch((err) => {
+      console.log('Service worker fetch failed or no internet connection:', err);
     });
 }
 

@@ -1,22 +1,22 @@
 
-import React, { Component, useState, useEffect, Suspense, ReactNode } from 'react';
+import React, { Component, useState, useEffect, Suspense, ReactNode, lazy, FC } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+// Fixed: Removed 'Layout' as it is not a valid export from lucide-react
 import { LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
 
 // Lazy Load Pages for Performance Optimization
-const Dashboard = React.lazy(() => import('./pages/Dashboard'));
-const ExamSetup = React.lazy(() => import('./pages/ExamSetup'));
-const ExamPortal = React.lazy(() => import('./pages/ExamPortal'));
-const Analytics = React.lazy(() => import('./pages/Analytics'));
-const History = React.lazy(() => import('./pages/History'));
-const Admin = React.lazy(() => import('./pages/Admin'));
-const Practice = React.lazy(() => import('./pages/Practice'));
-const Daily = React.lazy(() => import('./pages/Daily'));
-const Login = React.lazy(() => import('./pages/Login'));
-const Signup = React.lazy(() => import('./pages/Signup'));
+import Dashboard from './pages/Dashboard';
+const ExamSetup = lazy(() => import('./pages/ExamSetup'));
+const ExamPortal = lazy(() => import('./pages/ExamPortal'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const History = lazy(() => import('./pages/History'));
+const Admin = lazy(() => import('./pages/Admin'));
+const Practice = lazy(() => import('./pages/Practice'));
+const Daily = lazy(() => import('./pages/Daily'));
+const Login = lazy(() => import('./pages/Login'));
+const Signup = lazy(() => import('./pages/Signup'));
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -32,8 +32,7 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
-    const msg = error.message?.toLowerCase() || '';
-    const isNetwork = msg.includes('network') || msg.includes('fetch') || error.name === 'ChunkLoadError';
+    const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
     return { hasError: true, errorType: isNetwork ? 'network' : 'logic' };
   }
 
@@ -49,7 +48,7 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </h2>
           <p className="text-slate-500 text-sm mb-8 max-w-sm leading-relaxed mx-auto font-medium">
             {this.state.errorType === 'network' 
-              ? 'A critical network request failed. This often happens due to unstable connectivity or blocked API endpoints.' 
+              ? 'Your internet connection dropped while loading this module. Reconnect to resume.' 
               : 'A cognitive processing error occurred while initializing this section.'}
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
@@ -74,7 +73,7 @@ class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 }
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const ProtectedRoute: FC<{ children: ReactNode }> = ({ children }) => {
   const profileRaw = localStorage.getItem('user_profile');
   if (!profileRaw) return <Navigate to="/login" replace />;
   const profile = JSON.parse(profileRaw);
@@ -82,7 +81,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const AdminRoute: FC<{ children: ReactNode }> = ({ children }) => {
   const profileRaw = localStorage.getItem('user_profile');
   if (!profileRaw) return <Navigate to="/login" replace />;
   const profile = JSON.parse(profileRaw);
@@ -109,26 +108,21 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
   const profile = JSON.parse(localStorage.getItem('user_profile') || '{}');
 
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut().catch(() => {});
+    if (supabase) await supabase.auth.signOut();
     localStorage.removeItem('user_profile');
     navigate('/login');
   };
 
   return (
     <>
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
-            onClick={toggle}
-          />
-        )}
-      </AnimatePresence>
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
+          onClick={toggle}
+        />
+      )}
       
-      <motion.div 
+      <div 
         className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-slate-900/95 backdrop-blur-2xl border-r border-white/5 shadow-2xl transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] flex flex-col`}
       >
         <div className="p-8 flex items-center justify-between">
@@ -148,7 +142,7 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
             if (item.id === 'admin' && profile.role !== 'admin') return null;
             const isActive = location.pathname === item.path;
             return (
-              <motion.button
+              <button
                 key={item.id}
                 onClick={() => {
                   navigate(item.path);
@@ -156,17 +150,10 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
                 }}
                 className={`flex items-center w-full px-5 py-3.5 text-sm font-bold rounded-2xl transition-all group relative overflow-hidden ${
                   isActive
-                    ? 'text-white shadow-lg shadow-indigo-900/50'
+                    ? 'text-white shadow-lg shadow-indigo-900/50 bg-gradient-to-r from-indigo-600 to-violet-600'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {isActive && (
-                  <motion.div 
-                    layoutId="nav-pill" 
-                    className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl"
-                    transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                  />
-                )}
                 {!isActive && (
                   <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl" />
                 )}
@@ -175,7 +162,7 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
                   {item.icon}
                 </span>
                 <span className="relative z-10 tracking-wide font-extrabold uppercase text-[11px]">{item.label}</span>
-              </motion.button>
+              </button>
             );
           })}
         </nav>
@@ -210,7 +197,7 @@ const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean
             </button>
           </div>
         </div>
-      </motion.div>
+      </div>
     </>
   );
 };
@@ -303,12 +290,8 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen bg-[#f1f5f9] text-[#0f172a] selection:bg-indigo-100 selection:text-indigo-900">
-      <AnimatePresence mode="wait">
         {isOffline && (
-          <motion.div 
-             initial={{ y: 50, opacity: 0 }}
-             animate={{ y: 0, opacity: 1 }}
-             exit={{ y: 50, opacity: 0 }}
+          <div 
              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] px-8 py-4 bg-slate-900 text-white rounded-[1.5rem] shadow-2xl flex items-center gap-4 border border-white/10"
           >
              <div className="bg-red-500 p-1.5 rounded-lg animate-pulse"><WifiOff className="w-4 h-4 text-white" /></div>
@@ -316,11 +299,11 @@ const AppContent = () => {
                 <span className="text-[11px] font-black uppercase tracking-widest">Network Interrupted</span>
                 <span className="text-[10px] font-bold text-slate-400">Operating on local cache. Reconnect to sync.</span>
              </div>
-          </motion.div>
+          </div>
         )}
 
         {isAuth ? (
-          <motion.div key="auth-wrapper" className="w-full min-h-screen" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+          <div key="auth-wrapper" className="w-full min-h-screen">
               <NetworkErrorBoundary>
                 <Suspense fallback={<PageLoader />}>
                   <Routes location={location}>
@@ -330,9 +313,9 @@ const AppContent = () => {
                   </Routes>
                 </Suspense>
               </NetworkErrorBoundary>
-          </motion.div>
+          </div>
         ) : isExamPortal ? (
-          <motion.div key="exam-portal-wrapper" className="w-full h-full" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+          <div key="exam-portal-wrapper" className="w-full h-full">
               <ProtectedRoute>
                 <NetworkErrorBoundary>
                   <Suspense fallback={<PageLoader />}>
@@ -342,7 +325,7 @@ const AppContent = () => {
                   </Suspense>
                 </NetworkErrorBoundary>
               </ProtectedRoute>
-          </motion.div>
+          </div>
         ) : (
           <ProtectedRoute key="main-app-wrapper">
             <div className="min-h-screen relative flex">
@@ -356,13 +339,8 @@ const AppContent = () => {
               <div className="flex-1 flex flex-col min-w-0">
                 <Header toggleSidebar={() => setSidebarOpen(true)} />
                 <main className="flex-1 lg:ml-[280px] p-4 sm:p-6 lg:p-10 transition-all overflow-x-hidden pt-4">
-                  <AnimatePresence mode="wait" initial={false}>
-                    <motion.div
+                    <div
                       key={location.pathname}
-                      initial={{ opacity: 0, y: 12, filter: 'blur(8px)' }}
-                      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                      exit={{ opacity: 0, y: -12, filter: 'blur(8px)' }}
-                      transition={{ duration: 0.35, ease: [0.23, 1, 0.32, 1] }}
                       className="w-full"
                     >
                       <NetworkErrorBoundary>
@@ -379,14 +357,12 @@ const AppContent = () => {
                           </Routes>
                         </Suspense>
                       </NetworkErrorBoundary>
-                    </motion.div>
-                  </AnimatePresence>
+                    </div>
                 </main>
               </div>
             </div>
           </ProtectedRoute>
         )}
-      </AnimatePresence>
     </div>
   );
 };

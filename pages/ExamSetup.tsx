@@ -197,7 +197,7 @@ const ExamSetup = () => {
                         <p className="text-2xl font-black text-slate-900">{totalQuestions} Questions</p>
                     </div>
                     <div className="text-right">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Est. Duration</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Exam Duration</p>
                         <p className="text-2xl font-black text-slate-900">~{estimatedTime} Mins</p>
                     </div>
                 </div>

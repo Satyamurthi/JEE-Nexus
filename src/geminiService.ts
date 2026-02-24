@@ -150,7 +150,8 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       const sessionEntropy = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
       
       const prompt = `BatchID: ${sessionEntropy}. 
-      Generate ${count} COMPLETELY UNIQUE and NEVER-BEFORE-SEEN questions for ${subject} (${type} level). 
+      Generate EXACTLY ${count} COMPLETELY UNIQUE and NEVER-BEFORE-SEEN questions for ${subject} (${type} level). 
+      DISTRIBUTION: You MUST generate exactly ${totalMcqTarget} Multiple Choice Questions (type: "MCQ") and exactly ${totalNumTarget} Numerical Value Questions (type: "Numerical").
       Scope: ${topicFocus}. 
       Mandatory: Do NOT repeat problems from standard mock tests or previous batches. 
       Vary the parameters, numerical values, and conceptual combinations. 
@@ -175,8 +176,8 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
                       ...q,
                       id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                       subject: q.subject || subject,
-                      type: q.options ? 'MCQ' : 'Numerical',
-                      markingScheme: q.markingScheme || (q.options ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
+                      type: (q.type === 'Numerical' || !q.options || q.options.length === 0) ? 'Numerical' : 'MCQ',
+                      markingScheme: q.markingScheme || ((q.type === 'Numerical' || !q.options || q.options.length === 0) ? { positive: 4, negative: 0 } : { positive: 4, negative: 1 })
                   })));
               }
           } catch (parseErr) {
@@ -190,6 +191,41 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
   const finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
   const finalNums = allQuestions.filter(q => q.type === 'Numerical').slice(0, totalNumTarget);
+
+  // Pad with placeholders if AI generated fewer questions to prevent layout/order breaking
+  while (finalMcqs.length < totalMcqTarget) {
+      finalMcqs.push({
+          id: `fallback-mcq-${Date.now()}-${Math.random()}`,
+          subject,
+          chapter: "General",
+          type: "MCQ",
+          difficulty: "Medium",
+          statement: "Placeholder Question: The AI failed to generate enough questions for this section. Please skip or mark for review.",
+          options: ["A", "B", "C", "D"],
+          correctAnswer: "A",
+          solution: "Placeholder",
+          explanation: "Placeholder",
+          concept: "Placeholder",
+          markingScheme: { positive: 4, negative: 1 }
+      });
+  }
+
+  while (finalNums.length < totalNumTarget) {
+      finalNums.push({
+          id: `fallback-num-${Date.now()}-${Math.random()}`,
+          subject,
+          chapter: "General",
+          type: "Numerical",
+          difficulty: "Medium",
+          statement: "Placeholder Question: The AI failed to generate enough numerical questions for this section. Please skip or mark for review.",
+          options: [],
+          correctAnswer: "0",
+          solution: "Placeholder",
+          explanation: "Placeholder",
+          concept: "Placeholder",
+          markingScheme: { positive: 4, negative: 0 }
+      });
+  }
 
   return [...finalMcqs, ...finalNums];
 };

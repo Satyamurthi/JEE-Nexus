@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './index.css';
 import App from './App';
 import * as serviceWorkerRegistration from './serviceWorkerRegistration';
 
@@ -11,9 +12,7 @@ if (!rootElement) {
   try {
     const root = ReactDOM.createRoot(rootElement);
     root.render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
+      <App />
     );
     
     // Register PWA Service Worker for performance gains on weak networks
