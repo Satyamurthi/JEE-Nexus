@@ -2,7 +2,7 @@
 import React, { Component, useState, useEffect, Suspense, ReactNode, lazy, FC } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 // Fixed: Removed 'Layout' as it is not a valid export from lucide-react
-import { LogOut, User, Bell, Search, Menu, X, Brain, ShieldCheck, ChevronLeft, Sparkles, LayoutGrid, Download, WifiOff, Loader2, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
+import { LogOut, Bell, Search, Menu, Brain, ChevronLeft, Sparkles, Download, WifiOff, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
 
