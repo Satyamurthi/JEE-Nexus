@@ -1,5 +1,5 @@
 
-import React from 'react';
+
 import { Brain, Target, History, Settings, ChevronRight, LayoutGrid, BookOpen, Clock, Activity, Award, User, LogOut, Flame, CalendarClock } from 'lucide-react';
 
 export const APP_NAME = "JEE Nexus AI";

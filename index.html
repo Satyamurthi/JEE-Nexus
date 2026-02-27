@@ -163,7 +163,28 @@
     <script>
         // Polyfill process.env for AI Studio runtime injection
         window.process = window.process || { env: {} };
+
+        // Emergency Cache Purge - Fixes the "Invalid Hook Call" caused by stale Service Worker cache
+        (function() {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                    for (let registration of registrations) {
+                        registration.unregister().then(() => {
+                            console.log('SW Unregistered');
+                        });
+                    }
+                });
+            }
+            if ('caches' in window) {
+                caches.keys().then(names => {
+                    for (let name of names) caches.delete(name);
+                });
+            }
+            // Clear local storage if it contains stale state that might trigger old components
+            // But keep user_profile to avoid forcing login if not necessary
+            // localStorage.clear(); 
+        })();
     </script>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.tsx?v=purge_1"></script>
 </body>
 </html>

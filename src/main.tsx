@@ -1,5 +1,5 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
+import { HashRouter } from 'react-router-dom';
 import './index.css';
 import App from './App';
 import * as serviceWorkerRegistration from './serviceWorkerRegistration';
@@ -10,13 +10,18 @@ if (!rootElement) {
   console.error("FATAL: Root element not found");
 } else {
   try {
-    const root = ReactDOM.createRoot(rootElement);
+    // Force unregister stale service workers to prevent caching issues during development
+    serviceWorkerRegistration.unregister();
+    
+    const root = createRoot(rootElement);
     root.render(
-      <App />
+      <HashRouter>
+        <App />
+      </HashRouter>
     );
     
-    // Register PWA Service Worker for performance gains on weak networks
-    serviceWorkerRegistration.register();
+    // Disable registration during troubleshooting to prevent stale cache issues
+    // serviceWorkerRegistration.register();
     
     // Clean up initial loader after a small delay to ensure React has painted
     setTimeout(() => {

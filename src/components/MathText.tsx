@@ -1,12 +1,12 @@
 
-import React from 'react';
+import { FC } from 'react';
 
 interface MathTextProps {
   children: string;
   className?: string;
 }
 
-const MathText: React.FC<MathTextProps> = ({ children, className = '' }) => {
+const MathText: FC<MathTextProps> = ({ children, className = '' }) => {
   // Simple implementation: just render the text. 
   // In a real app, this would use KaTeX or MathJax to render LaTeX.
   return (

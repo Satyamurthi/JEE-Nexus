@@ -1,22 +1,21 @@
-
-import React, { Component, useState, useEffect, Suspense, ReactNode, lazy, FC } from 'react';
-import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-// Fixed: Removed 'Layout' as it is not a valid export from lucide-react
+import React, { useState, useEffect } from 'react';
+import type { ReactNode, FC } from 'react';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { LogOut, Bell, Search, Menu, Brain, ChevronLeft, Sparkles, Download, WifiOff, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
 
-// Lazy Load Pages for Performance Optimization
+// Direct imports for all pages to ensure stability and avoid context issues
 import Dashboard from './pages/Dashboard';
-const ExamSetup = lazy(() => import('./pages/ExamSetup'));
-const ExamPortal = lazy(() => import('./pages/ExamPortal'));
-const Analytics = lazy(() => import('./pages/Analytics'));
-const History = lazy(() => import('./pages/History'));
-const Admin = lazy(() => import('./pages/Admin'));
-const Practice = lazy(() => import('./pages/Practice'));
-const Daily = lazy(() => import('./pages/Daily'));
-const Login = lazy(() => import('./pages/Login'));
-const Signup = lazy(() => import('./pages/Signup'));
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import ExamSetup from './pages/ExamSetup';
+import ExamPortal from './pages/ExamPortal';
+import Analytics from './pages/Analytics';
+import History from './pages/History';
+import Admin from './pages/Admin';
+import Practice from './pages/Practice';
+import Daily from './pages/Daily';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -25,52 +24,6 @@ interface ErrorBoundaryProps {
 interface ErrorBoundaryState {
   hasError: boolean;
   errorType?: 'network' | 'logic';
-}
-
-// Fix: Use the imported Component class directly to ensure proper TypeScript inference of setState and props
-class NetworkErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
-
-  static getDerivedStateFromError(error: any): ErrorBoundaryState {
-    const isNetwork = error.message?.includes('network') || error.name === 'ChunkLoadError';
-    return { hasError: true, errorType: isNetwork ? 'network' : 'logic' };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center bg-white/50 backdrop-blur-xl rounded-[3rem] border border-slate-100 shadow-premium m-4 animate-in fade-in zoom-in-95 duration-500">
-          <div className={`p-5 rounded-3xl mb-6 ${this.state.errorType === 'network' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
-             {this.state.errorType === 'network' ? <CloudRain className="w-10 h-10" /> : <AlertTriangle className="w-10 h-10" />}
-          </div>
-          <h2 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">
-            {this.state.errorType === 'network' ? 'Connection Interrupted' : 'Module Loading Error'}
-          </h2>
-          <p className="text-slate-500 text-sm mb-8 max-w-sm leading-relaxed mx-auto font-medium">
-            {this.state.errorType === 'network' 
-              ? 'Your internet connection dropped while loading this module. Reconnect to resume.' 
-              : 'A cognitive processing error occurred while initializing this section.'}
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3">
-              <button 
-                onClick={() => window.location.reload()}
-                className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Reload Application
-              </button>
-              <button 
-                onClick={() => this.setState({ hasError: false })}
-                className="px-8 py-4 bg-white text-slate-500 border border-slate-100 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all"
-              >
-                Dismiss
-              </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 const ProtectedRoute: FC<{ children: ReactNode }> = ({ children }) => {
@@ -88,19 +41,6 @@ const AdminRoute: FC<{ children: ReactNode }> = ({ children }) => {
   if (profile.role !== 'admin') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
-
-const PageLoader = () => (
-  <div className="flex flex-col items-center justify-center min-h-[50vh] animate-in fade-in duration-500">
-    <div className="relative">
-      <div className="w-14 h-14 border-[3px] border-slate-100 rounded-full"></div>
-      <div className="absolute top-0 left-0 w-14 h-14 border-[3px] border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
-    </div>
-    <div className="mt-6 flex flex-col items-center gap-1">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] animate-pulse">Syncing Cognitive Layer</p>
-        <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Optimizing for bandwidth...</p>
-    </div>
-  </div>
-);
 
 const Sidebar = ({ isOpen, toggle, installPrompt, onInstall }: { isOpen: boolean, toggle: () => void, installPrompt: any, onInstall: () => void }) => {
   const navigate = useNavigate();
@@ -303,31 +243,23 @@ const AppContent = () => {
         )}
 
         {isAuth ? (
-          <div key="auth-wrapper" className="w-full min-h-screen">
-              <NetworkErrorBoundary>
-                <Suspense fallback={<PageLoader />}>
-                  <Routes location={location}>
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/signup" element={<Signup />} />
-                    <Route path="*" element={<Navigate to="/login" replace />} />
-                  </Routes>
-                </Suspense>
-              </NetworkErrorBoundary>
+          <div className="w-full min-h-screen">
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
           </div>
         ) : isExamPortal ? (
-          <div key="exam-portal-wrapper" className="w-full h-full">
-              <ProtectedRoute>
-                <NetworkErrorBoundary>
-                  <Suspense fallback={<PageLoader />}>
-                    <Routes location={location}>
-                      <Route path="/exam-portal" element={<ExamPortal />} />
-                    </Routes>
-                  </Suspense>
-                </NetworkErrorBoundary>
-              </ProtectedRoute>
+          <div className="w-full h-full">
+            <ProtectedRoute>
+              <Routes>
+                <Route path="/exam-portal" element={<ExamPortal />} />
+              </Routes>
+            </ProtectedRoute>
           </div>
         ) : (
-          <ProtectedRoute key="main-app-wrapper">
+          <ProtectedRoute>
             <div className="min-h-screen relative flex">
               <BackgroundBlobs />
               <Sidebar 
@@ -339,24 +271,17 @@ const AppContent = () => {
               <div className="flex-1 flex flex-col min-w-0">
                 <Header toggleSidebar={() => setSidebarOpen(true)} />
                 <main className="flex-1 lg:ml-[280px] p-4 sm:p-6 lg:p-10 transition-all overflow-x-hidden pt-4">
-                    <div
-                      key={location.pathname}
-                      className="w-full"
-                    >
-                      <NetworkErrorBoundary>
-                        <Suspense fallback={<PageLoader />}>
-                          <Routes location={location}>
-                            <Route path="/" element={<Dashboard />} />
-                            <Route path="/daily" element={<Daily />} />
-                            <Route path="/exam-setup" element={<ExamSetup />} />
-                            <Route path="/practice" element={<Practice />} />
-                            <Route path="/analytics" element={<Analytics />} />
-                            <Route path="/history" element={<History />} />
-                            <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
-                            <Route path="*" element={<Navigate to="/" replace />} />
-                          </Routes>
-                        </Suspense>
-                      </NetworkErrorBoundary>
+                    <div className="w-full">
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/daily" element={<Daily />} />
+                        <Route path="/exam-setup" element={<ExamSetup />} />
+                        <Route path="/practice" element={<Practice />} />
+                        <Route path="/analytics" element={<Analytics />} />
+                        <Route path="/history" element={<History />} />
+                        <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                      </Routes>
                     </div>
                 </main>
               </div>
@@ -369,9 +294,7 @@ const AppContent = () => {
 
 const App = () => {
   return (
-    <HashRouter>
-      <AppContent />
-    </HashRouter>
+    <AppContent />
   );
 };
 
