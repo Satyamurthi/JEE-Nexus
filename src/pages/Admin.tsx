@@ -1,10 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert } from 'lucide-react';
 import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
-import { useNavigate } from 'react-router-dom';
 import { NCERT_CHAPTERS } from '../constants';
-import { Subject, ExamType } from '../types';
 import MathText from '../components/MathText';
 
 interface SubjectConfig {
@@ -23,31 +21,93 @@ interface GenerationConfig {
 const SubjectConfigModal = ({ isOpen, onClose, subject, config, onUpdate }: { isOpen: boolean; onClose: () => void; subject: string; config: SubjectConfig; onUpdate: (newConfig: SubjectConfig) => void; }) => {
     const chapters = NCERT_CHAPTERS[subject as keyof typeof NCERT_CHAPTERS] || [];
     const [localChapters, setLocalChapters] = useState<string[]>(config.chapters);
+    const [localTopics, setLocalTopics] = useState<string[]>(config.topics);
 
-    useEffect(() => { if(isOpen) { setLocalChapters(config.chapters); } }, [isOpen, config]);
+    useEffect(() => { 
+        if(isOpen) { 
+            setLocalChapters(config.chapters); 
+            setLocalTopics(config.topics);
+        } 
+    }, [isOpen, config]);
 
     const handleChapterToggle = (chapName: string) => {
-        setLocalChapters(prev => prev.includes(chapName) ? prev.filter(c => c !== chapName) : [...prev, chapName]);
+        setLocalChapters(prev => {
+            const isRemoving = prev.includes(chapName);
+            if (isRemoving) {
+                // Also remove topics belonging to this chapter
+                const chapterData = chapters.find(c => c.name === chapName);
+                if (chapterData) {
+                    setLocalTopics(tPrev => tPrev.filter(t => !chapterData.topics.includes(t)));
+                }
+                return prev.filter(c => c !== chapName);
+            } else {
+                return [...prev, chapName];
+            }
+        });
     };
 
-    const handleSave = () => { onUpdate({ ...config, chapters: localChapters, topics: [] }); onClose(); };
+    const handleTopicToggle = (topic: string) => {
+        setLocalTopics(prev => prev.includes(topic) ? prev.filter(t => t !== topic) : [...prev, topic]);
+    };
+
+    const handleSave = () => { onUpdate({ ...config, chapters: localChapters, topics: localTopics }); onClose(); };
 
     if (!isOpen) return null;
+
+    const selectedChapterData = chapters.filter(c => localChapters.includes(c.name));
+
     return (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-[2rem] w-full max-w-xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="bg-white rounded-[2rem] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
                 <div className="p-6 border-b flex items-center justify-between bg-slate-50">
                     <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Syllabus: {subject}</h3>
                     <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="text-slate-400 w-5 h-5" /></button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
-                    {chapters.map(c => (
-                        <button key={c.name} onClick={() => handleChapterToggle(c.name)} className={`w-full p-4 rounded-xl text-left text-xs font-bold border-2 transition-all flex items-center justify-between ${localChapters.includes(c.name) ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
-                            {c.name}
-                            {localChapters.includes(c.name) && <CheckCircle2 className="w-4 h-4" />}
-                        </button>
-                    ))}
+                
+                <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                    {/* Chapters Section */}
+                    <div className="space-y-4">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Chapters</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {chapters.map(c => (
+                                <button key={c.name} onClick={() => handleChapterToggle(c.name)} className={`p-4 rounded-xl text-left text-xs font-bold border-2 transition-all flex items-center justify-between ${localChapters.includes(c.name) ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
+                                    {c.name}
+                                    {localChapters.includes(c.name) && <CheckCircle2 className="w-4 h-4" />}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Topics Section */}
+                    {localChapters.length > 0 && (
+                        <div className="space-y-4 pt-6 border-t border-slate-100">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Topics (Optional)</h4>
+                            <div className="space-y-6">
+                                {selectedChapterData.map(chap => (
+                                    <div key={chap.name} className="space-y-3">
+                                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{chap.name}</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {chap.topics.map(topic => (
+                                                <button
+                                                    key={topic}
+                                                    onClick={() => handleTopicToggle(topic)}
+                                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border ${
+                                                        localTopics.includes(topic)
+                                                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                            : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-100'
+                                                    }`}
+                                                >
+                                                    {topic}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
+
                 <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
                     <button onClick={onClose} className="px-6 py-3 font-bold text-slate-400 text-xs uppercase tracking-widest">Cancel</button>
                     <button onClick={handleSave} className="px-8 py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg">Apply Selection</button>
@@ -58,7 +118,6 @@ const SubjectConfigModal = ({ isOpen, onClose, subject, config, onUpdate }: { is
 };
 
 const Admin = () => {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('DAILY PAPER UPLOAD');
   const [users, setUsers] = useState<any[]>([]);
   const [dailyPapers, setDailyPapers] = useState<any[]>([]);
@@ -172,18 +231,12 @@ create policy "Users can insert own attempts" on daily_attempts for insert with 
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
 create policy "Admins view all attempts" on daily_attempts for select using (exists (select 1 from profiles where id = auth.uid() and role = 'admin'));`;
 
-  useEffect(() => {
-    if (activeTab === 'USER MANAGEMENT') loadUsers();
-    if (activeTab === 'DAILY CHALLENGES' || activeTab === 'DAILY PAPER UPLOAD') loadDailyPapers();
-    if (activeTab === 'RESULT ANALYSIS') loadAnalysis();
-  }, [activeTab]);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     const { data } = await getAllProfiles();
     setUsers(data || []);
-  };
+  }, []);
 
-  const loadAnalysis = async () => {
+  const loadAnalysis = useCallback(async () => {
       const attempts = await getDailyAttempts(analysisDate);
       const processed = attempts.map((attempt, index) => {
           const data = attempt.attempt_data || [];
@@ -197,12 +250,18 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
           return { rank: index + 1, name: attempt.user_name || 'Scholar', stats, total: attempt.score };
       });
       setAnalysisData(processed);
-  };
+  }, [analysisDate]);
 
-  const loadDailyPapers = async () => {
+  const loadDailyPapers = useCallback(async () => {
     const papers = await getAllDailyChallenges();
     setDailyPapers(papers);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'USER MANAGEMENT') loadUsers();
+    if (activeTab === 'DAILY CHALLENGES' || activeTab === 'DAILY PAPER UPLOAD') loadDailyPapers();
+    if (activeTab === 'RESULT ANALYSIS') loadAnalysis();
+  }, [activeTab, loadAnalysis, loadDailyPapers, loadUsers]);
 
   const handleAIGenerateDaily = async () => {
       setIsGeneratingAI(true);
@@ -484,7 +543,10 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
                                         <div className="flex-1">
                                             <p className="text-sm font-black text-slate-900">{s}</p>
                                             <button onClick={() => { setActiveConfigSubject(s); setModalOpen(true); }} className="text-[9px] font-black text-indigo-600 uppercase flex items-center gap-1.5 hover:underline tracking-tighter">
-                                                <Sliders className="w-2.5 h-2.5" /> {generationConfig[key].chapters.length === 0 ? "Full Syllabus" : `${generationConfig[key].chapters.length} Chapters`}
+                                                <Sliders className="w-2.5 h-2.5" /> 
+                                                {generationConfig[key].chapters.length === 0 
+                                                    ? "Full Syllabus" 
+                                                    : `${generationConfig[key].chapters.length} Chapters${generationConfig[key].topics.length > 0 ? ` (${generationConfig[key].topics.length} Topics)` : ''}`}
                                             </button>
                                         </div>
                                         <div className="flex items-center gap-6">
@@ -558,7 +620,9 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
                                             <span className="text-[9px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full">{q.subject}</span>
                                             <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{q.type}</span>
                                         </div>
-                                        <MathText text={q.statement.substring(0, 200) + (q.statement.length > 200 ? '...' : '')} className="text-sm font-bold text-slate-700 leading-relaxed" />
+                                        <MathText className="text-sm font-bold text-slate-700 leading-relaxed">
+                                            {q.statement.substring(0, 200) + (q.statement.length > 200 ? '...' : '')}
+                                        </MathText>
                                     </div>
                                 ))}
                             </div>

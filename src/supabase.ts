@@ -71,24 +71,83 @@ export const saveQuestionsToDB = async (questions: any[]) => {
   }
 };
 
-export const fetchQuestionsFromDB = async (subject?: string, chapter?: string, limit: number = 10) => {
+export const fetchQuestionsFromDB = async (subject?: string, chapter?: string, topics?: string[], mcqCount: number = 10, numericalCount: number = 0) => {
   if (!supabase) {
     let all = getLocal('nexus_question_bank');
     if (subject) all = all.filter((q: any) => q.subject === subject);
     if (chapter) all = all.filter((q: any) => q.chapter === chapter);
-    return all.reverse().slice(0, limit);
+    if (topics && topics.length > 0) all = all.filter((q: any) => topics.includes(q.topic || q.concept));
+    
+    const mcqs = all.filter((q: any) => q.type === 'MCQ').reverse().slice(0, mcqCount);
+    const numericals = all.filter((q: any) => q.type === 'Numerical').reverse().slice(0, numericalCount);
+    
+    return [...mcqs, ...numericals];
   }
   try {
-    let query = supabase.from('questions').select('*');
-    if (subject) query = query.eq('subject', subject);
-    if (chapter) query = query.eq('chapter', chapter);
-    const { data, error } = await query.limit(limit).order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
+    const fetchByType = async (type: string, count: number) => {
+        if (count <= 0) return [];
+        let query = supabase.from('questions').select('*').eq('type', type);
+        if (subject) query = query.eq('subject', subject);
+        if (chapter) query = query.eq('chapter', chapter);
+        if (topics && topics.length > 0) query = query.in('concept', topics); // Assuming 'concept' is used for topics in DB
+        const { data, error } = await query.limit(count).order('created_at', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    };
+
+    const [mcqs, numericals] = await Promise.all([
+        fetchByType('MCQ', mcqCount),
+        fetchByType('Numerical', numericalCount)
+    ]);
+
+    return [...mcqs, ...numericals];
   } catch (e) {
     console.warn("Supabase fetch failed:", e);
     return [];
   }
+};
+
+export const submitExamAttempt = async (attempt: any) => {
+  if (!supabase) {
+      const attempts = getLocal('nexus_exam_attempts');
+      attempts.push(attempt);
+      setLocal('nexus_exam_attempts', attempts);
+      return { data: attempt, error: null };
+  }
+  try {
+    const { data, error } = await supabase.from('exam_attempts').insert(attempt).select().single();
+    return { data, error };
+  } catch (e) {
+    return { data: null, error: e };
+  }
+};
+
+export const getUserExamAttempts = async (userId: string) => {
+  if (!supabase) {
+      const attempts = getLocal('nexus_exam_attempts');
+      return attempts.filter((a: any) => a.user_id === userId).sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  }
+  try {
+    const { data, error } = await supabase.from('exam_attempts').select('*').eq('user_id', userId).order('submitted_at', { ascending: false });
+    if (error) return [];
+    return data;
+  } catch (e) {
+    return [];
+  }
+};
+
+export const getUserAllDailyAttempts = async (userId: string) => {
+    if (!supabase) {
+        const attempts = getLocal('nexus_daily_attempts');
+        return attempts.filter((a: any) => a.user_id === userId).sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+    }
+    try {
+      const { data, error } = await supabase.from('daily_attempts').select('*').eq('user_id', userId).order('submitted_at', { ascending: false });
+      if (error) return [];
+      return data;
+    } catch (e) {
+      return [];
+    }
 };
 
 export const getAllProfiles = async () => {
@@ -183,23 +242,14 @@ export const createDailyChallenge = async (date: string, questions: any[]) => {
   }
 };
 
-export const submitDailyAttempt = async (userId: string, date: string, score: number, total: number, stats: any, attemptData: any[]) => {
-  const attempt = { 
-      user_id: userId, 
-      date: date, 
-      score, 
-      total_marks: total, 
-      stats, 
-      attempt_data: attemptData, 
-      submitted_at: new Date().toISOString() 
-  };
+export const submitDailyAttempt = async (attempt: any) => {
   if (!supabase) {
       const attempts = getLocal('nexus_daily_attempts');
-      const existingIdx = attempts.findIndex((a: any) => a.user_id === userId && a.date === date);
+      const existingIdx = attempts.findIndex((a: any) => a.user_id === attempt.user_id && a.date === attempt.date);
       if (existingIdx >= 0) attempts[existingIdx] = attempt;
       else attempts.push(attempt);
       setLocal('nexus_daily_attempts', attempts);
-      return attempt;
+      return { data: attempt, error: null };
   }
   try {
     const { data, error } = await supabase.from('daily_attempts').upsert(attempt, { onConflict: 'user_id, date' }).select().single();

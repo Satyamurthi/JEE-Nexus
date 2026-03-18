@@ -141,6 +141,9 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
   
   const isFullSyllabus = !chapters || chapters.length === 0;
   let topicFocus = isFullSyllabus ? "Full Syllabus" : `Chapters: ${chapters.join(', ')}`;
+  if (topics && topics.length > 0) {
+      topicFocus += ` | Specific Topics: ${topics.join(', ')}`;
+  }
 
   // --- ATTEMPT 1: GOOGLE GEMINI AI ---
   try {
@@ -249,11 +252,11 @@ export const getQuickHint = async (statement: string, subject: string): Promise<
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
     // Distributed generation with random delays to avoid hitting same-key rate limits simultaneously
-    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', [], config.physics);
+    const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', config.physics.topics, config.physics);
     await delay(1000);
-    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', [], config.chemistry);
+    const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', config.chemistry.topics, config.chemistry);
     await delay(1000);
-    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', [], config.mathematics);
+    const mathematics = await generateJEEQuestions(Subject.Mathematics, config.mathematics.mcq + config.mathematics.numerical, ExamType.Advanced, config.mathematics.chapters, 'Hard', config.mathematics.topics, config.mathematics);
     return { physics, chemistry, mathematics };
   } catch (error) {
     console.error("Full paper generation failed:", error);

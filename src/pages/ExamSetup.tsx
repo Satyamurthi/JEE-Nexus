@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Zap, BookOpen, Clock, AlertTriangle, CheckCircle2, Loader2, PlayCircle, Atom, Sliders, Hash, RotateCcw, Database } from 'lucide-react';
 import { ExamType, Subject } from '../types';
 import { generateJEEQuestions } from '../geminiService';
-import { motion } from 'framer-motion';
 
 const ExamSetup = () => {
   const navigate = useNavigate();
@@ -105,15 +104,14 @@ const ExamSetup = () => {
             </h2>
             <div className="grid grid-cols-2 gap-4">
               {[ExamType.Main, ExamType.Advanced].map((type) => (
-                <motion.button
+                <button
                   key={type}
-                  whileHover={{ scale: 1.02 }}
                   onClick={() => setExamType(type)}
                   className={`p-6 rounded-3xl border-2 transition-all text-center ${examType === type ? 'border-blue-500 bg-blue-600 text-white shadow-xl shadow-blue-500/30' : 'border-slate-100 bg-white hover:border-blue-200 text-slate-600'}`}
                 >
                   <span className="block font-black text-lg">{type}</span>
                   <span className={`text-xs font-bold uppercase tracking-widest ${examType === type ? 'text-blue-200' : 'text-slate-400'}`}>Official Pattern</span>
-                </motion.button>
+                </button>
               ))}
             </div>
           </div>
@@ -127,13 +125,13 @@ const ExamSetup = () => {
               {[Subject.Physics, Subject.Chemistry, Subject.Mathematics].map((sub) => {
                 const isSelected = selectedSubjects.includes(sub);
                 return (
-                    <motion.div key={sub} onClick={() => { if (isSelected && selectedSubjects.length > 1) setSelectedSubjects(selectedSubjects.filter(s => s !== sub)); else if (!isSelected) setSelectedSubjects([...selectedSubjects, sub]); }}
+                    <div key={sub} onClick={() => { if (isSelected && selectedSubjects.length > 1) setSelectedSubjects(selectedSubjects.filter(s => s !== sub)); else if (!isSelected) setSelectedSubjects([...selectedSubjects, sub]); }}
                         className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center gap-4 ${isSelected ? 'bg-purple-50 border-purple-500 shadow-md' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
                         <div className={`w-6 h-6 rounded-md flex items-center justify-center border-2 transition-colors ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-slate-300 bg-white'}`}>
                             {isSelected && <CheckCircle2 className="w-4 h-4 text-white" />}
                         </div>
                         <span className={`font-bold ${isSelected ? 'text-purple-900' : 'text-slate-600'}`}>{sub}</span>
-                    </motion.div>
+                    </div>
                 );
               })}
             </div>
@@ -203,17 +201,17 @@ const ExamSetup = () => {
                 </div>
 
                 {!preparedQuestions.length ? (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} onClick={preparePaper} disabled={isPreparing || selectedSubjects.length === 0}
+                    <button onClick={preparePaper} disabled={isPreparing || selectedSubjects.length === 0}
                     className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xl shadow-2xl flex items-center justify-center gap-4 disabled:opacity-50">
                     {isPreparing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Atom className="w-6 h-6 text-fuchsia-400" />}
                     {isPreparing ? "Initializing..." : "Generate Paper"}
-                    </motion.button>
+                    </button>
                 ) : (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }} onClick={launchExam}
+                    <button onClick={launchExam}
                     className="w-full py-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-[2rem] font-black text-xl shadow-2xl items-center justify-center gap-4 flex">
                     <PlayCircle className="w-7 h-7" />
                     Begin Examination
-                    </motion.button>
+                    </button>
                 )}
             </div>
           </div>

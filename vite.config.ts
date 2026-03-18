@@ -25,10 +25,10 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, './src'),
         },
-        dedupe: ['react', 'react-dom', 'react-router-dom', 'react-router', 'react-is', 'framer-motion', 'lucide-react']
+        dedupe: ['react', 'react-dom', 'react-router-dom', 'react-router', 'react-is', 'framer-motion', 'lucide-react', 'recharts', 'motion/react']
       },
       optimizeDeps: {
-        include: ['react', 'react-dom', 'react-router-dom', 'react-router', 'lucide-react', 'framer-motion']
+        include: ['react', 'react-dom', 'react-router-dom', 'react-router', 'react-is', 'lucide-react', 'framer-motion', 'recharts', 'motion/react']
       }
     };
 });

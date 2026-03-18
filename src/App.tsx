@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { ReactNode, FC } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { LogOut, Bell, Search, Menu, Brain, ChevronLeft, Sparkles, Download, WifiOff, RefreshCw, AlertTriangle, CloudRain } from 'lucide-react';
+import { LogOut, Bell, Search, Menu, Brain, ChevronLeft, Sparkles, Download, WifiOff } from 'lucide-react';
 import { MENU_ITEMS, APP_NAME } from './constants';
 import { supabase } from './supabase';
 
@@ -13,6 +13,7 @@ import ExamSetup from './pages/ExamSetup';
 import ExamPortal from './pages/ExamPortal';
 import Analytics from './pages/Analytics';
 import History from './pages/History';
+import Results from './pages/Results';
 import Admin from './pages/Admin';
 import Practice from './pages/Practice';
 import Daily from './pages/Daily';
@@ -279,6 +280,7 @@ const AppContent = () => {
                         <Route path="/practice" element={<Practice />} />
                         <Route path="/analytics" element={<Analytics />} />
                         <Route path="/history" element={<History />} />
+                        <Route path="/results" element={<Results />} />
                         <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>

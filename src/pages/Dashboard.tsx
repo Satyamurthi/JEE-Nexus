@@ -331,7 +331,7 @@ const Dashboard = () => {
                   </div>
               ) : (
                   recentActivity.map((item, idx) => (
-                    <div key={idx} onClick={() => { localStorage.setItem('last_result', JSON.stringify(item)); navigate('/analytics'); }} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 bg-white rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-blue-100/50">
+                    <div key={idx} onClick={() => { localStorage.setItem('last_exam_result', JSON.stringify(item)); navigate('/results'); }} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 bg-white rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-blue-100/50">
                       <div className="flex items-center gap-5 mb-4 sm:mb-0">
                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold shadow-md ${
                             item.score > (item.totalPossible * 0.7) ? 'bg-emerald-500 shadow-emerald-200' : 'bg-indigo-500 shadow-indigo-200'
