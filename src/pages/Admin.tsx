@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert, XCircle } from 'lucide-react';
+import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert, XCircle, Settings } from 'lucide-react';
 import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { NCERT_CHAPTERS } from '../constants';
@@ -462,22 +462,25 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
         </div>
         
         {/* Warning Banner from Image */}
-        {!supabase && (
-          <div className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-4 max-w-xl shadow-sm">
-             <div className="flex items-center gap-3 flex-1">
-               <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
-               <p className="text-[10px] font-bold text-orange-800 leading-tight">
-                 View-Only Mode. To enable Write Access, run the 'Database Repair Script' (fixes login issues).
-               </p>
-             </div>
-             <button 
-               onClick={() => setIsUtilityOpen(true)}
-               className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all shrink-0 shadow-lg shadow-slate-900/10"
-             >
-                <Terminal className="w-3 h-3" /> DATABASE UTILITY
-             </button>
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {supabase ? (
+            <div className="hidden sm:flex bg-green-50 border border-green-100 p-3 px-4 rounded-2xl items-center gap-3 shadow-sm">
+              <Database className="w-4 h-4 text-green-600" />
+              <p className="text-[10px] font-bold text-green-800">Connected</p>
+            </div>
+          ) : (
+            <div className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 shadow-sm">
+              <AlertTriangle className="w-4 h-4 text-orange-600" />
+              <p className="text-[10px] font-bold text-orange-800">Offline Mode</p>
+            </div>
+          )}
+          <button 
+            onClick={() => setIsUtilityOpen(true)}
+            className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all shrink-0 shadow-lg shadow-slate-900/10"
+          >
+            <Terminal className="w-3 h-3" /> DATABASE UTILITY
+          </button>
+        </div>
       </div>
 
       {/* Tabs Menu */}
@@ -745,6 +748,47 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
                     ))}
                 </tbody>
              </table>
+        </div>
+      )}
+
+      {activeTab === 'SYSTEM SETTINGS' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+          <div className="bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center gap-3">
+              <Database className="w-6 h-6 text-indigo-500" />
+              <h3 className="text-xl font-black text-slate-900">Database Management</h3>
+            </div>
+            <p className="text-sm font-bold text-slate-500 leading-relaxed">
+              Access the system repair utility to update the database schema, manage RLS policies, or configure custom Supabase credentials.
+            </p>
+            <button 
+              onClick={() => setIsUtilityOpen(true)}
+              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-slate-900/10 flex items-center justify-center gap-3 hover:bg-slate-800 transition-all"
+            >
+              <Terminal className="w-4 h-4" /> Open Database Utility
+            </button>
+          </div>
+
+          <div className="bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center gap-3">
+              <Settings className="w-6 h-6 text-indigo-500" />
+              <h3 className="text-xl font-black text-slate-900">Platform Configuration</h3>
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-xs font-bold text-slate-600">Enrollment Approval Required</span>
+                <div className="w-10 h-6 bg-indigo-600 rounded-full relative">
+                  <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 opacity-50">
+                <span className="text-xs font-bold text-slate-600">Maintenance Mode</span>
+                <div className="w-10 h-6 bg-slate-300 rounded-full relative">
+                  <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full"></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
