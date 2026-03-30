@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert } from 'lucide-react';
+import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert, XCircle } from 'lucide-react';
 import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { NCERT_CHAPTERS } from '../constants';
@@ -181,9 +181,10 @@ const Admin = () => {
 create extension if not exists pgcrypto;
 
 create table if not exists public.profiles (
-  id uuid references auth.users on delete cascade not null primary key,
+  id uuid primary key default gen_random_uuid(),
   email text unique not null,
   full_name text,
+  password text,
   role text default 'student' check (role in ('student', 'admin')),
   status text default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -199,9 +200,11 @@ BEGIN
     INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
     VALUES ('00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', 'name@admin.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "System Admin"}', now(), now());
   END IF;
-  INSERT INTO public.profiles (id, email, full_name, role, status)
-  SELECT id, email, 'System Admin', 'admin', 'approved' FROM auth.users WHERE email = 'name@admin.com'
-  ON CONFLICT (id) DO UPDATE SET role = 'admin', status = 'approved';
+  
+  -- Ensure admin exists in profiles with correct password and status
+  INSERT INTO public.profiles (id, email, full_name, role, status, password)
+  SELECT id, email, 'System Admin', 'admin', 'approved', 'admin123' FROM auth.users WHERE email = 'name@admin.com'
+  ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
 END $$;
 
 -- 3. RLS POLICIES
@@ -726,8 +729,16 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
                             <td className="px-8 py-6"><span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.status === 'approved' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{u.status}</span></td>
                             <td className="px-8 py-6 text-right">
                                 <div className="flex justify-end gap-3">
-                                    <button onClick={() => updateProfileStatus(u.id, 'approved')} className="p-2.5 text-green-600 bg-green-50 rounded-xl hover:scale-110 transition-transform"><CheckCircle2 className="w-4 h-4" /></button>
-                                    <button onClick={() => deleteProfile(u.id)} className="p-2.5 text-red-400 bg-red-50 rounded-xl hover:scale-110 transition-transform"><Trash2 className="w-4 h-4" /></button>
+                                    {u.status === 'pending' && (
+                                        <button onClick={() => updateProfileStatus(u.id, 'approved')} className="p-2.5 text-green-600 bg-green-50 rounded-xl hover:scale-110 transition-transform" title="Approve"><CheckCircle2 className="w-4 h-4" /></button>
+                                    )}
+                                    {u.status === 'pending' && (
+                                        <button onClick={() => updateProfileStatus(u.id, 'rejected')} className="p-2.5 text-amber-600 bg-amber-50 rounded-xl hover:scale-110 transition-transform" title="Reject"><XCircle className="w-4 h-4" /></button>
+                                    )}
+                                    {u.status === 'approved' && (
+                                        <button onClick={() => updateProfileStatus(u.id, 'pending')} className="p-2.5 text-slate-400 bg-slate-50 rounded-xl hover:scale-110 transition-transform" title="Revoke Approval"><RefreshCw className="w-4 h-4" /></button>
+                                    )}
+                                    <button onClick={() => deleteProfile(u.id)} className="p-2.5 text-red-400 bg-red-50 rounded-xl hover:scale-110 transition-transform" title="Delete Profile"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                             </td>
                         </tr>

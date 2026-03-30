@@ -52,6 +52,13 @@ const Login = () => {
         return;
       }
 
+      // Check password
+      if (user.password && user.password !== password) {
+        setError("Invalid security key.");
+        setIsLoading(false);
+        return;
+      }
+
       // Check for approval status
       if (user.status !== 'approved') {
         setError("Your account is pending approval from the administrator. Please check back later.");

@@ -39,6 +39,7 @@ const Signup = () => {
         id: uuid,
         email: email.toLowerCase(),
         full_name: fullName,
+        password: password, // Store password for custom enrollment flow
         role: 'student',
         status: 'pending', // Set to pending for admin approval
         created_at: new Date().toISOString()
@@ -51,7 +52,10 @@ const Signup = () => {
           .insert(newUser);
         
         if (dbError) {
-          console.warn("Supabase signup failed, falling back to local storage:", dbError);
+          console.error("Supabase signup failed:", dbError);
+          setError(`Enrollment failed: ${dbError.message}. Please ensure the Database Repair Script has been run in Supabase.`);
+          setIsLoading(false);
+          return;
         }
       }
 
