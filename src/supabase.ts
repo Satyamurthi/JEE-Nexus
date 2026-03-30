@@ -178,8 +178,15 @@ export const updateProfileStatus = async (userId: string, status: string) => {
   }
   try {
     const { data, error } = await supabase.from('profiles').update({ status }).eq('id', userId).select();
-    if (error) return error.message;
-    if (!data || data.length === 0) return "Update failed: Permission denied or Profile not found.";
+    if (error) {
+      console.error("Supabase update error:", error);
+      return error.message;
+    }
+    if (!data || data.length === 0) {
+      const { data: session } = await supabase.auth.getSession();
+      console.warn("Update returned no data. Session:", session);
+      return "Update failed: Permission denied or Profile not found.";
+    }
     return null;
   } catch (e: any) {
     return e.message || "Network error during profile update.";
@@ -194,7 +201,11 @@ export const deleteProfile = async (userId: string) => {
   }
   try {
     const { error } = await supabase.from('profiles').delete().eq('id', userId);
-    return error ? error.message : null;
+    if (error) {
+      console.error("Supabase delete error:", error);
+      return error.message;
+    }
+    return null;
   } catch (e: any) {
     return e.message;
   }

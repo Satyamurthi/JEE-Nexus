@@ -122,14 +122,30 @@ const Admin = () => {
   const [users, setUsers] = useState<any[]>([]);
   const [isAuth, setIsAuth] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isLocalAuth, setIsLocalAuth] = useState(false);
 
   useEffect(() => {
+    // Check local auth first
+    const localProfile = localStorage.getItem('user_profile');
+    if (localProfile) {
+        try {
+            const profile = JSON.parse(localProfile);
+            setCurrentUser(profile);
+            setIsLocalAuth(true);
+        } catch (e) {
+            console.error("Error parsing local profile", e);
+        }
+    }
+
     if (supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         setIsAuth(!!session);
         if (session?.user) {
             supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({ data }) => {
-                setCurrentUser(data);
+                if (data) {
+                    setCurrentUser(data);
+                    setIsLocalAuth(false); // Supabase auth takes precedence
+                }
             });
         }
       });
@@ -138,10 +154,21 @@ const Admin = () => {
         setIsAuth(!!session);
         if (session?.user) {
             supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({ data }) => {
-                setCurrentUser(data);
+                if (data) {
+                    setCurrentUser(data);
+                    setIsLocalAuth(false);
+                }
             });
         } else {
-            setCurrentUser(null);
+            // Revert to local auth if session lost
+            const lp = localStorage.getItem('user_profile');
+            if (lp) {
+                setCurrentUser(JSON.parse(lp));
+                setIsLocalAuth(true);
+            } else {
+                setCurrentUser(null);
+                setIsLocalAuth(false);
+            }
         }
       });
 
@@ -153,6 +180,13 @@ const Admin = () => {
   const [analysisDate, setAnalysisDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [analysisData, setAnalysisData] = useState<any[]>([]);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+        const timer = setTimeout(() => setToast(null), 5000);
+        return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Daily Paper Upload State
   const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
@@ -173,9 +207,67 @@ const Admin = () => {
   });
 
   const [isUtilityOpen, setIsUtilityOpen] = useState(false);
+  const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
+  const [signInEmail, setSignInEmail] = useState('name@admin.com');
+  const [signInPassword, setSignInPassword] = useState('');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [repairStatus, setRepairStatus] = useState<'idle' | 'running' | 'success'>('idle');
   const [customUrl, setCustomUrl] = useState(localStorage.getItem('custom_supabase_url') || '');
   const [customKey, setCustomKey] = useState(localStorage.getItem('custom_supabase_key') || '');
+
+  const handleCloudSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setIsSigningIn(true);
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: signInEmail,
+            password: signInPassword
+        });
+        if (error) throw error;
+        setToast({ message: "Cloud Authentication Successful", type: 'success' });
+        setIsSignInModalOpen(false);
+    } catch (err: any) {
+        setToast({ message: err.message || "Cloud Sign-In Failed", type: 'error' });
+    } finally {
+        setIsSigningIn(false);
+    }
+  };
+
+  const syncLocalData = async () => {
+    if (!supabase) return;
+    setIsSyncing(true);
+    try {
+        const localProfiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
+        if (localProfiles.length === 0) {
+            setToast({ message: "No local data found to sync", type: 'error' });
+            return;
+        }
+
+        let successCount = 0;
+        for (const profile of localProfiles) {
+            // Check if profile exists in Supabase
+            const { data: existing } = await supabase.from('profiles').select('id').eq('email', profile.email).maybeSingle();
+            if (!existing) {
+                const { error } = await supabase.from('profiles').insert({
+                    email: profile.email,
+                    full_name: profile.full_name,
+                    password: profile.password,
+                    role: profile.role,
+                    status: profile.status
+                });
+                if (!error) successCount++;
+            }
+        }
+        setToast({ message: `Synced ${successCount} profiles to Cloud`, type: 'success' });
+        loadUsers();
+    } catch (err: any) {
+        setToast({ message: err.message || "Sync failed", type: 'error' });
+    } finally {
+        setIsSyncing(false);
+    }
+  };
 
   const runRepair = async () => {
     setRepairStatus('running');
@@ -397,6 +489,76 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
 
   return (
     <div className="space-y-6 pb-20">
+      {/* Cloud Sign-In Modal */}
+      {isSignInModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+            <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+                <div className="p-8 border-b bg-slate-50 flex justify-between items-center">
+                    <div>
+                        <h2 className="text-xl font-black text-slate-900">Cloud Authentication</h2>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Sign in to enable RLS & Cloud Writes</p>
+                    </div>
+                    <button onClick={() => setIsSignInModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                        <X className="w-5 h-5 text-slate-400" />
+                    </button>
+                </div>
+
+                <form onSubmit={handleCloudSignIn} className="p-8 space-y-6">
+                    <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3">
+                        <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <p className="text-[11px] font-bold text-amber-800 leading-relaxed">
+                            Cloud writes (Approve/Reject/Delete) require a valid Supabase Auth session. 
+                            Default admin: <code className="bg-amber-100 px-1 rounded">name@admin.com</code>
+                        </p>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                            <input 
+                                type="email"
+                                value={signInEmail}
+                                onChange={(e) => setSignInEmail(e.target.value)}
+                                className="w-full mt-2 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                placeholder="name@admin.com"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Security Key</label>
+                            <input 
+                                type="password"
+                                value={signInPassword}
+                                onChange={(e) => setSignInPassword(e.target.value)}
+                                className="w-full mt-2 p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                placeholder="••••••••"
+                                required
+                            />
+                        </div>
+                    </div>
+
+                    <button 
+                        type="submit"
+                        disabled={isSigningIn}
+                        className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                        {isSigningIn ? (
+                            <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Authenticating...
+                            </>
+                        ) : (
+                            <>
+                                <Zap className="w-4 h-4" />
+                                Sign In to Cloud
+                            </>
+                        )}
+                    </button>
+                </form>
+            </div>
+        </div>
+      )}
+
       {/* Database Utility Modal */}
       {isUtilityOpen && (
           <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
@@ -555,12 +717,15 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
         <div className="flex items-center gap-4">
           {supabase ? (
             <div className="flex items-center gap-3">
-              <div className={`hidden sm:flex ${isAuth ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'} border p-3 px-4 rounded-2xl items-center gap-3 shadow-sm`}>
-                <div className={`w-2 h-2 ${isAuth ? 'bg-emerald-500' : 'bg-amber-500'} rounded-full animate-pulse`}></div>
-                <p className={`text-[10px] font-bold ${isAuth ? 'text-emerald-800' : 'text-amber-800'}`}>
-                  {isAuth ? `Authenticated: ${currentUser?.role || 'User'}` : 'Unauthenticated (Sign In Required)'}
+              <button 
+                onClick={() => !isAuth && setIsSignInModalOpen(true)}
+                className={`hidden sm:flex ${isAuth ? 'bg-emerald-50 border-emerald-100' : isLocalAuth ? 'bg-blue-50 border-blue-100 hover:bg-blue-100' : 'bg-amber-50 border-amber-100 hover:bg-amber-100'} border p-3 px-4 rounded-2xl items-center gap-3 shadow-sm transition-colors`}
+              >
+                <div className={`w-2 h-2 ${isAuth ? 'bg-emerald-500' : isLocalAuth ? 'bg-blue-500' : 'bg-amber-500'} rounded-full ${isAuth ? 'animate-pulse' : ''}`}></div>
+                <p className={`text-[10px] font-bold ${isAuth ? 'text-emerald-800' : isLocalAuth ? 'text-blue-800' : 'text-amber-800'}`}>
+                  {isAuth ? `Cloud Auth: ${currentUser?.role || 'User'}` : isLocalAuth ? `Local Auth: ${currentUser?.role || 'Admin'} (Sign In to Cloud)` : 'Unauthenticated (Click to Sign In)'}
                 </p>
-              </div>
+              </button>
               <div className="hidden sm:flex bg-blue-50 border border-blue-100 p-3 px-4 rounded-2xl items-center gap-3 shadow-sm">
                 <Database className="w-4 h-4 text-blue-600" />
                 <p className="text-[10px] font-bold text-blue-800">Cloud Active</p>
@@ -898,14 +1063,27 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
                   <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
                 </div>
               </div>
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 opacity-50">
-                <span className="text-xs font-bold text-slate-600">Maintenance Mode</span>
-                <div className="w-10 h-6 bg-slate-300 rounded-full relative">
-                  <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full"></div>
-                </div>
-              </div>
+              <button 
+                onClick={syncLocalData}
+                disabled={isSyncing || !supabase}
+                className="w-full py-4 bg-slate-50 text-slate-600 rounded-xl border border-slate-100 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all disabled:opacity-50"
+              >
+                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Sync Local Data to Cloud
+              </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-8 right-8 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right duration-300 ${toast.type === 'success' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+            {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+            <p className="text-xs font-black uppercase tracking-widest">{toast.message}</p>
+            <button onClick={() => setToast(null)} className="ml-4 p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X className="w-4 h-4" />
+            </button>
         </div>
       )}
     </div>

@@ -28,7 +28,7 @@ const Login = () => {
       if (supabase) {
         // Attempt real Supabase Auth sign in first (essential for RLS)
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: email.includes('@') ? email : `${email}@nexus.com`, // Handle username-only login for admin
+          email: email.includes('@') ? email : `${email}@admin.com`, // Handle username-only login for admin
           password: password
         });
 
@@ -41,6 +41,7 @@ const Login = () => {
             .single();
           if (dbUser) user = dbUser;
         } else {
+          console.warn("Supabase Auth failed, trying profile table fallback:", authError?.message);
           // Fallback to manual profile check (for users not in auth.users like students)
           const { data: dbUser } = await supabase
             .from('profiles')
@@ -56,6 +57,7 @@ const Login = () => {
 
       // 2. Fallback to local storage if not found in backend
       if (!user) {
+        console.warn("User not found in Supabase, checking local storage...");
         const profiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
         user = profiles.find((p: any) => 
           p.email.toLowerCase() === email.toLowerCase() || 
@@ -86,6 +88,15 @@ const Login = () => {
       // In this version, we'll allow access if the user exists in either directory.
       // For a real production app, we would use supabase.auth.signInWithPassword here.
       localStorage.setItem('user_profile', JSON.stringify(user));
+      
+      // If we got here but didn't have a Supabase session, we should warn the user if they are an admin
+      if (user.role === 'admin' && supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+              console.warn("Admin logged in without Cloud Session. Cloud writes will be restricted.");
+          }
+      }
+
       navigate('/');
     } catch (err) {
       console.error("Login error:", err);
