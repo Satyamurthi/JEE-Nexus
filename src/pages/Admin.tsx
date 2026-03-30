@@ -190,6 +190,11 @@ create table if not exists public.profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Ensure columns exist if table was created in a previous version
+alter table public.profiles add column if not exists password text;
+alter table public.profiles add column if not exists status text default 'pending' check (status in ('pending', 'approved', 'rejected'));
+alter table public.profiles add column if not exists role text default 'student' check (role in ('student', 'admin'));
+
 -- 2. ADMIN PROVISIONING
 -- Creates name@admin.com with password admin123
 DO $$
@@ -221,19 +226,27 @@ create policy "Anyone can insert profiles" on profiles for insert with check (tr
 -- 4. APP TABLES
 create table if not exists public.questions (id uuid default gen_random_uuid() primary key, subject text not null, chapter text, type text, difficulty text, statement text not null, options jsonb, "correctAnswer" text not null, solution text, explanation text, concept text, "markingScheme" jsonb default '{"positive": 4, "negative": 1}', created_at timestamp with time zone default timezone('utc'::text, now()) not null);
 alter table public.questions enable row level security;
+drop policy if exists "Read questions" on questions;
 create policy "Read questions" on questions for select using (true);
+drop policy if exists "Insert questions" on questions;
 create policy "Insert questions" on questions for insert with check (true);
 
 create table if not exists public.daily_challenges (date date primary key, questions jsonb not null, created_at timestamp with time zone default timezone('utc'::text, now()) not null);
 alter table public.daily_challenges enable row level security;
+drop policy if exists "Public Read Daily" on daily_challenges;
 create policy "Public Read Daily" on daily_challenges for select using (true);
+drop policy if exists "Public Insert Daily" on daily_challenges;
 create policy "Public Insert Daily" on daily_challenges for insert with check (true);
+drop policy if exists "Public Update Daily" on daily_challenges;
 create policy "Public Update Daily" on daily_challenges for update using (true);
 
 create table if not exists public.daily_attempts (user_id uuid references public.profiles(id) on delete cascade not null, date date references public.daily_challenges(date) on delete cascade not null, score integer, total_marks integer, stats jsonb, attempt_data jsonb, submitted_at timestamp with time zone default timezone('utc'::text, now()) not null, primary key (user_id, date));
 alter table public.daily_attempts enable row level security;
+drop policy if exists "Users can insert own attempts" on daily_attempts;
 create policy "Users can insert own attempts" on daily_attempts for insert with check (auth.uid() = user_id);
+drop policy if exists "Users can view own attempts" on daily_attempts;
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
+drop policy if exists "Admins view all attempts" on daily_attempts;
 create policy "Admins view all attempts" on daily_attempts for select using (exists (select 1 from profiles where id = auth.uid() and role = 'admin'));`;
 
   const loadUsers = useCallback(async () => {
