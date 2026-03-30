@@ -24,7 +24,7 @@ const Login = () => {
     try {
       let user = null;
 
-      // 1. Try to fetch from Supabase backend if configured
+      // 1. Try to fetch from Supabase backend
       if (supabase) {
         // Attempt real Supabase Auth sign in first (essential for RLS)
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -53,20 +53,14 @@ const Login = () => {
             user = dbUser;
           }
         }
-      }
-
-      // 2. Fallback to local storage if not found in backend
-      if (!user) {
-        console.warn("User not found in Supabase, checking local storage...");
-        const profiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
-        user = profiles.find((p: any) => 
-          p.email.toLowerCase() === email.toLowerCase() || 
-          (p.full_name && p.full_name.toLowerCase() === email.toLowerCase())
-        );
+      } else {
+        setError("Supabase not configured. Authorization is currently disabled.");
+        setIsLoading(false);
+        return;
       }
 
       if (!user) {
-        setError("User not found in directory. Please sign up first.");
+        setError("User not found in directory. Please enroll first.");
         setIsLoading(false);
         return;
       }
@@ -129,16 +123,6 @@ const Login = () => {
 
         {/* Login Card */}
         <div className="w-full bg-white rounded-[3rem] shadow-[0_32px_64px_-16px_rgba(79,70,229,0.1)] p-10 border border-indigo-50/50 backdrop-blur-sm">
-          {/* Offline Mode Alert */}
-          {isOffline && (
-            <div className="mb-8 flex items-center gap-3 bg-indigo-50/50 border border-indigo-100/50 p-4 rounded-2xl">
-              <Database className="w-5 h-5 text-indigo-600" />
-              <span className="text-[11px] font-bold text-indigo-700 tracking-tight">
-                Offline Mode: Using local storage for authentication.
-              </span>
-            </div>
-          )}
-
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="space-y-2">
               <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Identity Access</label>

@@ -79,20 +79,11 @@ const Signup = () => {
           setIsLoading(false);
           return;
         }
-      }
-
-      // 2. Always save to local storage as fallback/primary for demo
-      const profiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
-      
-      // Check if user already exists
-      if (profiles.some((p: any) => p.email.toLowerCase() === email.toLowerCase())) {
-        setError("An account with this email already exists.");
+      } else {
+        setError("Supabase not configured. Enrollment is currently disabled.");
         setIsLoading(false);
         return;
       }
-
-      profiles.push(newUser);
-      localStorage.setItem('nexus_profiles', JSON.stringify(profiles));
 
       setIsSuccess(true);
       setTimeout(() => {

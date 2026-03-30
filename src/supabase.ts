@@ -36,16 +36,6 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 
 export const isSupabaseConfigured = () => !!supabase;
 
-const getLocal = (key: string) => {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { return []; }
-};
-
-const setLocal = (key: string, data: any) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return Math.random().toString(36).substring(2, 15);
@@ -53,17 +43,7 @@ const generateId = () => {
 
 export const saveQuestionsToDB = async (questions: any[]) => {
   const formattedQuestions = questions.map(q => ({ ...q, id: q.id || generateId() }));
-  if (!supabase) {
-    const currentBank = getLocal('nexus_question_bank');
-    const merged = [...currentBank];
-    formattedQuestions.forEach(q => {
-      const idx = merged.findIndex(existing => existing.statement === q.statement);
-      if (idx >= 0) merged[idx] = q;
-      else merged.push(q);
-    });
-    setLocal('nexus_question_bank', merged);
-    return;
-  }
+  if (!supabase) return;
   try {
     await supabase.from('questions').upsert(formattedQuestions, { onConflict: 'statement' });
   } catch (e) {
@@ -72,17 +52,7 @@ export const saveQuestionsToDB = async (questions: any[]) => {
 };
 
 export const fetchQuestionsFromDB = async (subject?: string, chapter?: string, topics?: string[], mcqCount: number = 10, numericalCount: number = 0) => {
-  if (!supabase) {
-    let all = getLocal('nexus_question_bank');
-    if (subject) all = all.filter((q: any) => q.subject === subject);
-    if (chapter) all = all.filter((q: any) => q.chapter === chapter);
-    if (topics && topics.length > 0) all = all.filter((q: any) => topics.includes(q.topic || q.concept));
-    
-    const mcqs = all.filter((q: any) => q.type === 'MCQ').reverse().slice(0, mcqCount);
-    const numericals = all.filter((q: any) => q.type === 'Numerical').reverse().slice(0, numericalCount);
-    
-    return [...mcqs, ...numericals];
-  }
+  if (!supabase) return [];
   try {
     const fetchByType = async (type: string, count: number) => {
         if (count <= 0) return [];
@@ -108,12 +78,7 @@ export const fetchQuestionsFromDB = async (subject?: string, chapter?: string, t
 };
 
 export const submitExamAttempt = async (attempt: any) => {
-  if (!supabase) {
-      const attempts = getLocal('nexus_exam_attempts');
-      attempts.push(attempt);
-      setLocal('nexus_exam_attempts', attempts);
-      return { data: attempt, error: null };
-  }
+  if (!supabase) return { data: null, error: "Supabase not configured" };
   try {
     const { data, error } = await supabase.from('exam_attempts').insert(attempt).select().single();
     return { data, error };
@@ -123,10 +88,7 @@ export const submitExamAttempt = async (attempt: any) => {
 };
 
 export const getUserExamAttempts = async (userId: string) => {
-  if (!supabase) {
-      const attempts = getLocal('nexus_exam_attempts');
-      return attempts.filter((a: any) => a.user_id === userId).sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
-  }
+  if (!supabase) return [];
   try {
     const { data, error } = await supabase.from('exam_attempts').select('*').eq('user_id', userId).order('submitted_at', { ascending: false });
     if (error) return [];
@@ -137,10 +99,7 @@ export const getUserExamAttempts = async (userId: string) => {
 };
 
 export const getUserAllDailyAttempts = async (userId: string) => {
-    if (!supabase) {
-        const attempts = getLocal('nexus_daily_attempts');
-        return attempts.filter((a: any) => a.user_id === userId).sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
-    }
+    if (!supabase) return [];
     try {
       const { data, error } = await supabase.from('daily_attempts').select('*').eq('user_id', userId).order('submitted_at', { ascending: false });
       if (error) return [];
@@ -151,17 +110,17 @@ export const getUserAllDailyAttempts = async (userId: string) => {
 };
 
 export const getAllProfiles = async () => {
-  if (!supabase) return { data: getLocal('nexus_profiles'), error: null };
+  if (!supabase) return { data: [], error: "Supabase not configured" };
   try {
     const response = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
     return response;
   } catch (e: any) {
-    return { data: null, error: e };
+    return { data: [], error: e };
   }
 };
 
 export const getProfile = async (userId: string) => {
-  if (!supabase) return getLocal('nexus_profiles').find((p: any) => p.id === userId) || null;
+  if (!supabase) return null;
   try {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     return data;
@@ -171,26 +130,11 @@ export const getProfile = async (userId: string) => {
 };
 
 export const updateProfileStatus = async (userId: string, status: string) => {
-  if (!supabase) {
-    const profiles = getLocal('nexus_profiles');
-    setLocal('nexus_profiles', profiles.map((p: any) => p.id === userId ? { ...p, status } : p));
-    return null;
-  }
+  if (!supabase) return "Supabase not configured";
 
   try {
-    // Check for session first
     const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      // Fallback to local storage if no cloud session
-      const profiles = getLocal('nexus_profiles');
-      const profile = profiles.find((p: any) => p.id === userId);
-      if (profile) {
-        setLocal('nexus_profiles', profiles.map((p: any) => p.id === userId ? { ...p, status } : p));
-        return null;
-      }
-      return "Cloud session required for cloud updates, and profile not found in local directory.";
-    }
+    if (!session) return "Cloud session required for cloud updates. Please sign in to Cloud in the Admin panel.";
 
     const { data, error } = await supabase.from('profiles').update({ status }).eq('id', userId).select();
     if (error) {
@@ -207,21 +151,11 @@ export const updateProfileStatus = async (userId: string, status: string) => {
 };
 
 export const deleteProfile = async (userId: string) => {
-  if (!supabase) {
-    const profiles = getLocal('nexus_profiles');
-    setLocal('nexus_profiles', profiles.filter((p: any) => p.id !== userId));
-    return null;
-  }
+  if (!supabase) return "Supabase not configured";
 
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      // Fallback to local storage
-      const profiles = getLocal('nexus_profiles');
-      setLocal('nexus_profiles', profiles.filter((p: any) => p.id !== userId));
-      return null;
-    }
+    if (!session) return "Cloud session required for cloud updates.";
 
     const { error } = await supabase.from('profiles').delete().eq('id', userId);
     if (error) {
@@ -235,24 +169,11 @@ export const deleteProfile = async (userId: string) => {
 };
 
 export const syncLocalProfilesToSupabase = async () => {
-  if (!supabase) return { success: false, message: "Supabase not configured." };
-  const localProfiles = getLocal('nexus_profiles');
-  if (localProfiles.length === 0) return { success: true, message: "No local profiles to sync." };
-  
-  try {
-    const { error } = await supabase.from('profiles').upsert(localProfiles, { onConflict: 'email' });
-    if (error) throw error;
-    return { success: true, message: `Successfully synced ${localProfiles.length} profiles.` };
-  } catch (e: any) {
-    return { success: false, message: e.message || "Sync failed." };
-  }
+  return { success: true, message: "Local sync disabled. System is Cloud-only." };
 };
 
 export const getDailyChallenge = async (date: string) => {
-  if (!supabase) {
-    const papers = getLocal('nexus_daily_challenges');
-    return papers.find((p: any) => p.date === date) || null;
-  }
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase.from('daily_challenges').select('*').eq('date', date).single();
     if (error && error.code !== 'PGRST116') console.warn("Daily fetch error:", error);
@@ -263,7 +184,7 @@ export const getDailyChallenge = async (date: string) => {
 };
 
 export const getAllDailyChallenges = async () => {
-    if (!supabase) return getLocal('nexus_daily_challenges');
+    if (!supabase) return [];
     try {
         const { data } = await supabase.from('daily_challenges').select('*').order('date', { ascending: false });
         return data || [];
@@ -274,14 +195,7 @@ export const getAllDailyChallenges = async () => {
 
 export const createDailyChallenge = async (date: string, questions: any[]) => {
   const newChallenge = { date: date, questions: questions, created_at: new Date().toISOString() };
-  if (!supabase) {
-    const papers = getLocal('nexus_daily_challenges');
-    const existingIdx = papers.findIndex((p: any) => p.date === date);
-    if (existingIdx >= 0) papers[existingIdx] = newChallenge;
-    else papers.push(newChallenge);
-    setLocal('nexus_daily_challenges', papers);
-    return { data: newChallenge, error: null };
-  }
+  if (!supabase) return { data: null, error: "Supabase not configured" };
   try {
     const { data, error } = await supabase.from('daily_challenges').upsert(newChallenge, { onConflict: 'date' }).select().single();
     return { data, error };
@@ -291,14 +205,7 @@ export const createDailyChallenge = async (date: string, questions: any[]) => {
 };
 
 export const submitDailyAttempt = async (attempt: any) => {
-  if (!supabase) {
-      const attempts = getLocal('nexus_daily_attempts');
-      const existingIdx = attempts.findIndex((a: any) => a.user_id === attempt.user_id && a.date === attempt.date);
-      if (existingIdx >= 0) attempts[existingIdx] = attempt;
-      else attempts.push(attempt);
-      setLocal('nexus_daily_attempts', attempts);
-      return { data: attempt, error: null };
-  }
+  if (!supabase) return { data: null, error: "Supabase not configured" };
   try {
     const { data, error } = await supabase.from('daily_attempts').upsert(attempt, { onConflict: 'user_id, date' }).select().single();
     return { data, error };
@@ -308,10 +215,7 @@ export const submitDailyAttempt = async (attempt: any) => {
 };
 
 export const getUserDailyAttempt = async (userId: string, date: string) => {
-  if (!supabase) {
-      const attempts = getLocal('nexus_daily_attempts');
-      return attempts.find((a: any) => a.user_id === userId && a.date === date) || null;
-  }
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase.from('daily_attempts').select('*').eq('user_id', userId).eq('date', date).single();
     if (error && error.code !== 'PGRST116') return null;
@@ -322,14 +226,7 @@ export const getUserDailyAttempt = async (userId: string, date: string) => {
 };
 
 export const getDailyAttempts = async (date: string) => {
-  if (!supabase) {
-      const attempts = getLocal('nexus_daily_attempts');
-      const profiles = getLocal('nexus_profiles');
-      return attempts.filter((a: any) => a.date === date).map((a: any) => {
-          const user = profiles.find((p: any) => p.id === a.user_id);
-          return { ...a, user_email: user?.email || 'Deleted User', user_name: user?.full_name || 'Unknown' };
-      }).sort((a: any, b: any) => b.score - a.score);
-  }
+  if (!supabase) return [];
   try {
     const { data, error } = await supabase.from('daily_attempts').select('*, profiles:user_id ( email, full_name )').eq('date', date).order('score', { ascending: false });
     if (error) return [];

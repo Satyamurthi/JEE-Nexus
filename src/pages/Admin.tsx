@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert, XCircle, Settings } from 'lucide-react';
-import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges, syncLocalProfilesToSupabase } from '../supabase';
+import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { NCERT_CHAPTERS } from '../constants';
 import MathText from '../components/MathText';
@@ -219,8 +219,8 @@ const Admin = () => {
   });
   const [signInPassword, setSignInPassword] = useState('');
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [repairStatus, setRepairStatus] = useState<'idle' | 'running' | 'success'>('idle');
+  const [testResult, setTestResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error', message?: string }>({ status: 'idle' });
   const [customUrl, setCustomUrl] = useState(() => {
     try {
       const config = JSON.parse(localStorage.getItem('custom_supabase_config') || '{}');
@@ -253,46 +253,29 @@ const Admin = () => {
     }
   };
 
-  const syncLocalData = async () => {
-    if (!supabase) return;
-    setIsSyncing(true);
-    try {
-        const localProfiles = JSON.parse(localStorage.getItem('nexus_profiles') || '[]');
-        if (localProfiles.length === 0) {
-            setToast({ message: "No local data found to sync", type: 'error' });
-            return;
-        }
-
-        let successCount = 0;
-        for (const profile of localProfiles) {
-            // Check if profile exists in Supabase
-            const { data: existing } = await supabase.from('profiles').select('id').eq('email', profile.email).maybeSingle();
-            if (!existing) {
-                const { error } = await supabase.from('profiles').insert({
-                    email: profile.email,
-                    full_name: profile.full_name,
-                    password: profile.password,
-                    role: profile.role,
-                    status: profile.status
-                });
-                if (!error) successCount++;
-            }
-        }
-        setToast({ message: `Synced ${successCount} profiles to Cloud`, type: 'success' });
-        loadUsers();
-    } catch (err: any) {
-        setToast({ message: err.message || "Sync failed", type: 'error' });
-    } finally {
-        setIsSyncing(false);
-    }
-  };
-
   const runRepair = async () => {
     setRepairStatus('running');
     // Simulate a repair process
     await new Promise(resolve => setTimeout(resolve, 2000));
     setRepairStatus('success');
     setToast({ message: "Database Repair Protocol Executed. Please ensure SQL is applied in Supabase.", type: 'success' });
+  };
+
+  const testConnection = async () => {
+    if (!supabase) {
+        setTestResult({ status: 'error', message: "Supabase not configured." });
+        return;
+    }
+    setTestResult({ status: 'testing' });
+    try {
+        // Try to query the profiles table
+        const { error } = await supabase.from('profiles').select('count').limit(1);
+        if (error) throw error;
+        setTestResult({ status: 'success', message: "Connection verified. Schema is healthy." });
+    } catch (err: any) {
+        console.error("Connection test failed:", err);
+        setTestResult({ status: 'error', message: err.message || "Database error querying schema." });
+    }
   };
 
   const handleSaveConfig = () => {
@@ -319,8 +302,9 @@ const Admin = () => {
 -- 1. CORE TABLES
 create extension if not exists pgcrypto;
 
+-- Ensure profiles table exists with correct structure
 create table if not exists public.profiles (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key references auth.users on delete cascade,
   email text unique not null,
   full_name text,
   password text,
@@ -334,88 +318,94 @@ alter table public.profiles add column if not exists password text;
 alter table public.profiles add column if not exists status text default 'pending' check (status in ('pending', 'approved', 'rejected'));
 alter table public.profiles add column if not exists role text default 'student' check (role in ('student', 'admin'));
 
-  -- 2. ADMIN PROVISIONING
-  -- Creates name@admin.com and satyu000@gmail.com with password admin123
-  DO $$
-  DECLARE
-    new_user_id UUID := gen_random_uuid();
-    satyu_id UUID := gen_random_uuid();
-  BEGIN
-    -- Provision name@admin.com
-    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
-      INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-      VALUES ('00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', 'name@admin.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "System Admin"}', now(), now());
-    END IF;
-    
-    -- Provision satyu000@gmail.com (Primary Admin)
-    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'satyu000@gmail.com') THEN
-      INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-      VALUES ('00000000-0000-0000-0000-000000000000', satyu_id, 'authenticated', 'authenticated', 'satyu000@gmail.com', crypt('1@Vishruth', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "Satyu Admin"}', now(), now());
-    ELSE
-      -- Update password if user already exists
-      UPDATE auth.users SET encrypted_password = crypt('1@Vishruth', gen_salt('bf')) WHERE email = 'satyu000@gmail.com';
-    END IF;
-    
-    -- Ensure admins exist in profiles with correct password and status
-    INSERT INTO public.profiles (id, email, full_name, role, status, password)
-    SELECT id, email, 'System Admin', 'admin', 'approved', 'admin123' FROM auth.users WHERE email = 'name@admin.com'
-    ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
-
-    INSERT INTO public.profiles (id, email, full_name, role, status, password)
-    SELECT id, email, 'Satyu Admin', 'admin', 'approved', '1@Vishruth' FROM auth.users WHERE email = 'satyu000@gmail.com'
-    ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = '1@Vishruth';
-  END $$;
-
--- 2.6 ADMIN CHECK FUNCTION
+-- 2. ADMIN CHECK FUNCTION
 -- Security definer allows bypassing RLS for the check itself
--- We use a dedicated function to avoid recursion in RLS policies
-CREATE OR REPLACE FUNCTION public.is_admin(user_id uuid)
-RETURNS boolean AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = user_id
-    AND role = 'admin'
+create or replace function public.is_admin(user_id uuid)
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = user_id
+    and role = 'admin'
   );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- 2.7 SYNC ALL AUTH USERS TO PROFILES
--- This ensures that any user who signed up via Auth but doesn't have a profile yet gets one.
-INSERT INTO public.profiles (id, email, full_name, role, status)
-SELECT 
-  id, 
-  email, 
-  COALESCE(raw_user_meta_data->>'full_name', email), 
-  'student', 
-  'pending'
-FROM auth.users
-WHERE email != 'name@admin.com'
-ON CONFLICT (email) DO NOTHING;
+end;
+$$ language plpgsql security definer;
 
 -- 3. RLS POLICIES
 alter table public.profiles enable row level security;
-drop policy if exists "Public profiles are viewable by everyone" on profiles;
-create policy "Public profiles are viewable by everyone" on profiles for select using (true);
-drop policy if exists "Users can update own profile" on profiles;
-create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
-drop policy if exists "Admins can update all profiles" on profiles;
-create policy "Admins can update all profiles" on profiles for update using (public.is_admin(auth.uid()));
-drop policy if exists "Admins can delete profiles" on profiles;
-create policy "Admins can delete profiles" on profiles for delete using (public.is_admin(auth.uid()));
-drop policy if exists "Anyone can insert profiles" on profiles;
-create policy "Anyone can insert profiles" on profiles for insert with check (true);
 
--- 4. APP TABLES
-create table if not exists public.questions (id uuid default gen_random_uuid() primary key, subject text not null, chapter text, type text, difficulty text, statement text not null, options jsonb, "correctAnswer" text not null, solution text, explanation text, concept text, "markingScheme" jsonb default '{"positive": 4, "negative": 1}', created_at timestamp with time zone default timezone('utc'::text, now()) not null);
+-- Profiles: Users can read their own profile, admins can read all
+drop policy if exists "Profiles are viewable by owner and admins" on public.profiles;
+create policy "Profiles are viewable by owner and admins"
+on public.profiles for select
+using (auth.uid() = id or public.is_admin(auth.uid()));
+
+-- Profiles: Users can update their own profile (except role/status), admins can update all
+drop policy if exists "Profiles are updatable by owner and admins" on public.profiles;
+create policy "Profiles are updatable by owner and admins"
+on public.profiles for update
+using (auth.uid() = id or public.is_admin(auth.uid()))
+with check (
+  (auth.uid() = id and (role = role and status = status)) or -- Non-admins can't change role/status
+  public.is_admin(auth.uid())
+);
+
+-- Profiles: Admins can delete profiles
+drop policy if exists "Profiles are deletable by admins" on public.profiles;
+create policy "Profiles are deletable by admins"
+on public.profiles for delete
+using (public.is_admin(auth.uid()));
+
+-- Profiles: Allow initial insert during signup
+drop policy if exists "Profiles are insertable by anyone" on public.profiles;
+create policy "Profiles are insertable by anyone"
+on public.profiles for insert
+with check (true);
+
+-- 4. ADMIN PROVISIONING
+DO $$
+DECLARE
+  new_user_id UUID := gen_random_uuid();
+  satyu_id UUID := gen_random_uuid();
+BEGIN
+  -- Provision name@admin.com
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
+    INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', 'name@admin.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "System Admin"}', now(), now());
+  END IF;
+  
+  -- Provision satyu000@gmail.com (Primary Admin)
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'satyu000@gmail.com') THEN
+    INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('00000000-0000-0000-0000-000000000000', satyu_id, 'authenticated', 'authenticated', 'satyu000@gmail.com', crypt('1@Vishruth', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "Satyu Admin"}', now(), now());
+  ELSE
+    -- Update password if user already exists
+    UPDATE auth.users SET encrypted_password = crypt('1@Vishruth', gen_salt('bf')) WHERE email = 'satyu000@gmail.com';
+  END IF;
+  
+  -- Ensure admins exist in profiles with correct password and status
+  INSERT INTO public.profiles (id, email, full_name, role, status, password)
+  SELECT id, email, 'System Admin', 'admin', 'approved', 'admin123' FROM auth.users WHERE email = 'name@admin.com'
+  ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
+
+  INSERT INTO public.profiles (id, email, full_name, role, status, password)
+  SELECT id, email, 'Satyu Admin', 'admin', 'approved', '1@Vishruth' FROM auth.users WHERE email = 'satyu000@gmail.com'
+  ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = '1@Vishruth';
+END $$;
+
+-- 5. APP TABLES RLS
 alter table public.questions enable row level security;
 drop policy if exists "Read questions" on questions;
 create policy "Read questions" on questions for select using (true);
-drop policy if exists "Insert questions" on questions;
-create policy "Insert questions" on questions for insert with check (true);
+drop policy if exists "Manage questions" on questions;
+create policy "Manage questions" on questions for all using (public.is_admin(auth.uid()));
 
-create table if not exists public.daily_challenges (date date primary key, questions jsonb not null, created_at timestamp with time zone default timezone('utc'::text, now()) not null);
 alter table public.daily_challenges enable row level security;
+drop policy if exists "Read challenges" on daily_challenges;
+create policy "Read challenges" on daily_challenges for select using (true);
+drop policy if exists "Manage challenges" on daily_challenges;
+create policy "Manage challenges" on daily_challenges for all using (public.is_admin(auth.uid()));
+
 drop policy if exists "Public Read Daily" on daily_challenges;
 create policy "Public Read Daily" on daily_challenges for select using (true);
 drop policy if exists "Public Insert Daily" on daily_challenges;
@@ -430,7 +420,8 @@ create policy "Users can insert own attempts" on daily_attempts for insert with 
 drop policy if exists "Users can view own attempts" on daily_attempts;
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
 drop policy if exists "Admins view all attempts" on daily_attempts;
-create policy "Admins view all attempts" on daily_attempts for select using (public.is_admin(auth.uid()));`;
+create policy "Admins view all attempts" on daily_attempts for select using (public.is_admin(auth.uid()));
+`;
 
   const loadUsers = useCallback(async () => {
     const { data } = await getAllProfiles();
@@ -486,14 +477,6 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
               loadUsers();
           }
       }
-  };
-
-  const handleSyncLocal = async () => {
-      setIsSyncing(true);
-      const { success, message } = await syncLocalProfilesToSupabase();
-      setToast({ message, type: success ? 'success' : 'error' });
-      setIsSyncing(false);
-      if (success) loadUsers();
   };
 
   const handleAIGenerateDaily = async () => {
@@ -689,7 +672,15 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
                                           {supabase ? 'Enabled' : 'Restricted'}
                                       </span>
                                   </div>
-                                  <div className="pt-4 border-t border-slate-200">
+                                  <div className="pt-4 border-t border-slate-200 space-y-3">
+                                      <button 
+                                        onClick={testConnection}
+                                        disabled={testResult.status === 'testing'}
+                                        className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                                      >
+                                          {testResult.status === 'testing' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                                          {testResult.status === 'testing' ? 'Testing...' : 'Test Connection'}
+                                      </button>
                                       <button 
                                         onClick={runRepair}
                                         disabled={repairStatus === 'running'}
@@ -699,6 +690,15 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
                                           {repairStatus === 'running' ? 'Repairing...' : 'Run Internal Repair'}
                                       </button>
                                   </div>
+                                  {testResult.status !== 'idle' && (
+                                      <div className={`p-4 rounded-2xl border text-[10px] font-bold leading-relaxed ${
+                                          testResult.status === 'success' ? 'bg-green-50 border-green-100 text-green-700' : 
+                                          testResult.status === 'error' ? 'bg-red-50 border-red-100 text-red-700' : 
+                                          'bg-slate-50 border-slate-100 text-slate-500'
+                                      }`}>
+                                          {testResult.message}
+                                      </div>
+                                  )}
                               </div>
                           </div>
                       </div>
@@ -1031,12 +1031,6 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Active Directory</h3>
                 <div className="flex gap-3">
                     <button 
-                        onClick={handleSyncLocal}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors"
-                    >
-                        <RefreshCw className="w-3 h-3" /> Sync Local Data
-                    </button>
-                    <button 
                         onClick={loadUsers}
                         className="flex items-center gap-2 px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-slate-100 transition-colors"
                     >
@@ -1095,29 +1089,6 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
             >
               <Terminal className="w-4 h-4" /> Open Database Utility
             </button>
-          </div>
-
-          <div className="bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6">
-            <div className="flex items-center gap-3">
-              <Settings className="w-6 h-6 text-indigo-500" />
-              <h3 className="text-xl font-black text-slate-900">Platform Configuration</h3>
-            </div>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-xs font-bold text-slate-600">Enrollment Approval Required</span>
-                <div className="w-10 h-6 bg-indigo-600 rounded-full relative">
-                  <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
-                </div>
-              </div>
-              <button 
-                onClick={syncLocalData}
-                disabled={isSyncing || !supabase}
-                className="w-full py-4 bg-slate-50 text-slate-600 rounded-xl border border-slate-100 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all disabled:opacity-50"
-              >
-                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                Sync Local Data to Cloud
-              </button>
-            </div>
           </div>
         </div>
       )}
