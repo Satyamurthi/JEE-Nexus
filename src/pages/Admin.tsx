@@ -268,13 +268,15 @@ const Admin = () => {
     }
     setTestResult({ status: 'testing' });
     try {
-        // Try to query the profiles table
-        const { error } = await supabase.from('profiles').select('count').limit(1);
+        // Try to query the profiles table correctly
+        const { error } = await supabase.from('profiles').select('*').limit(1);
         if (error) throw error;
         setTestResult({ status: 'success', message: "Connection verified. Schema is healthy." });
     } catch (err: any) {
         console.error("Connection test failed:", err);
-        setTestResult({ status: 'error', message: err.message || "Database error querying schema." });
+        const msg = err.message || "Database error querying schema.";
+        setTestResult({ status: 'error', message: msg });
+        setToast({ message: msg, type: 'error' });
     }
   };
 
@@ -424,7 +426,11 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
 `;
 
   const loadUsers = useCallback(async () => {
-    const { data } = await getAllProfiles();
+    const { data, error } = await getAllProfiles();
+    if (error) {
+        console.error("Load users failed:", error);
+        setToast({ message: typeof error === 'string' ? error : (error as any).message || "Failed to load users", type: 'error' });
+    }
     setUsers(data || []);
   }, []);
 
