@@ -26,14 +26,31 @@ const Login = () => {
 
       // 1. Try to fetch from Supabase backend if configured
       if (supabase) {
-        const { data: dbUser } = await supabase
-          .from('profiles')
-          .select('*')
-          .or(`email.eq."${email}",full_name.eq."${email}"`)
-          .maybeSingle();
-        
-        if (dbUser) {
-          user = dbUser;
+        // Attempt real Supabase Auth sign in first (essential for RLS)
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: email.includes('@') ? email : `${email}@nexus.com`, // Handle username-only login for admin
+          password: password
+        });
+
+        if (!authError && authData.user) {
+          // Success! Now get the profile
+          const { data: dbUser } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', authData.user.id)
+            .single();
+          if (dbUser) user = dbUser;
+        } else {
+          // Fallback to manual profile check (for users not in auth.users like students)
+          const { data: dbUser } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`email.eq."${email}",full_name.eq."${email}"`)
+            .maybeSingle();
+          
+          if (dbUser) {
+            user = dbUser;
+          }
         }
       }
 

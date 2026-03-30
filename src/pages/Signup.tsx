@@ -29,14 +29,37 @@ const Signup = () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     try {
-      // Generate a proper UUID for Supabase compatibility
-      const uuid = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      let finalUserId = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
       });
 
+      // 1. Try to save to Supabase if configured
+      if (supabase) {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: email,
+          password: password,
+          options: {
+            data: {
+              full_name: fullName
+            }
+          }
+        });
+
+        if (authError) {
+          console.error("Supabase auth signup failed:", authError);
+          setError(`Enrollment failed: ${authError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        if (authData.user) {
+          finalUserId = authData.user.id;
+        }
+      }
+
       const newUser = {
-        id: uuid,
+        id: finalUserId,
         email: email.toLowerCase(),
         full_name: fullName,
         password: password, // Store password for custom enrollment flow
@@ -45,14 +68,13 @@ const Signup = () => {
         created_at: new Date().toISOString()
       };
 
-      // 1. Try to save to Supabase if configured
       if (supabase) {
         const { error: dbError } = await supabase
           .from('profiles')
           .insert(newUser);
         
         if (dbError) {
-          console.error("Supabase signup failed:", dbError);
+          console.error("Supabase profile insertion failed:", dbError);
           setError(`Enrollment failed: ${dbError.message}. Please ensure the Database Repair Script has been run in Supabase.`);
           setIsLoading(false);
           return;

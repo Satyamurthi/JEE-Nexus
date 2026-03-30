@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Loader2, Crown, Zap, Trash2, Copy, X, Eye, CheckCircle2, Sliders, Atom, Beaker, FunctionSquare, FileUp, FileText, AlertTriangle, Terminal, File, Settings2, Sparkles, Database, ShieldAlert, XCircle, Settings } from 'lucide-react';
-import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges } from '../supabase';
+import { supabase, getAllProfiles, updateProfileStatus, deleteProfile, createDailyChallenge, getDailyAttempts, getAllDailyChallenges, syncLocalProfilesToSupabase } from '../supabase';
 import { generateFullJEEDailyPaper, parseDocumentToQuestions } from '../geminiService';
 import { NCERT_CHAPTERS } from '../constants';
 import MathText from '../components/MathText';
@@ -120,6 +120,35 @@ const SubjectConfigModal = ({ isOpen, onClose, subject, config, onUpdate }: { is
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('DAILY PAPER UPLOAD');
   const [users, setUsers] = useState<any[]>([]);
+  const [isAuth, setIsAuth] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  useEffect(() => {
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setIsAuth(!!session);
+        if (session?.user) {
+            supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({ data }) => {
+                setCurrentUser(data);
+            });
+        }
+      });
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setIsAuth(!!session);
+        if (session?.user) {
+            supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({ data }) => {
+                setCurrentUser(data);
+            });
+        } else {
+            setCurrentUser(null);
+        }
+      });
+
+      return () => subscription.unsubscribe();
+    }
+  }, []);
+
   const [dailyPapers, setDailyPapers] = useState<any[]>([]);
   const [analysisDate, setAnalysisDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [analysisData, setAnalysisData] = useState<any[]>([]);
@@ -212,6 +241,32 @@ BEGIN
   ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
 END $$;
 
+-- 2.6 ADMIN CHECK FUNCTION
+-- Security definer allows bypassing RLS for the check itself
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid()
+    AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2.7 SYNC ALL AUTH USERS TO PROFILES
+-- This ensures that any user who signed up via Auth but doesn't have a profile yet gets one.
+INSERT INTO public.profiles (id, email, full_name, role, status)
+SELECT 
+  id, 
+  email, 
+  COALESCE(raw_user_meta_data->>'full_name', email), 
+  'student', 
+  'pending'
+FROM auth.users
+WHERE email != 'name@admin.com'
+ON CONFLICT (email) DO NOTHING;
+
 -- 3. RLS POLICIES
 alter table public.profiles enable row level security;
 drop policy if exists "Public profiles are viewable by everyone" on profiles;
@@ -219,7 +274,9 @@ create policy "Public profiles are viewable by everyone" on profiles for select 
 drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 drop policy if exists "Admins can update all profiles" on profiles;
-create policy "Admins can update all profiles" on profiles for update using (exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+create policy "Admins can update all profiles" on profiles for update using (public.is_admin());
+drop policy if exists "Admins can delete profiles" on profiles;
+create policy "Admins can delete profiles" on profiles for delete using (public.is_admin());
 drop policy if exists "Anyone can insert profiles" on profiles;
 create policy "Anyone can insert profiles" on profiles for insert with check (true);
 
@@ -247,7 +304,7 @@ create policy "Users can insert own attempts" on daily_attempts for insert with 
 drop policy if exists "Users can view own attempts" on daily_attempts;
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
 drop policy if exists "Admins view all attempts" on daily_attempts;
-create policy "Admins view all attempts" on daily_attempts for select using (exists (select 1 from profiles where id = auth.uid() and role = 'admin'));`;
+create policy "Admins view all attempts" on daily_attempts for select using (public.is_admin());`;
 
   const loadUsers = useCallback(async () => {
     const { data } = await getAllProfiles();
@@ -280,6 +337,26 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
     if (activeTab === 'DAILY CHALLENGES' || activeTab === 'DAILY PAPER UPLOAD') loadDailyPapers();
     if (activeTab === 'RESULT ANALYSIS') loadAnalysis();
   }, [activeTab, loadAnalysis, loadDailyPapers, loadUsers]);
+
+  const handleUpdateStatus = async (id: string, status: string) => {
+      const err = await updateProfileStatus(id, status);
+      if (err) console.error(err);
+      loadUsers();
+  };
+
+  const handleDeleteProfile = async (id: string) => {
+      if (window.confirm("Are you sure you want to delete this profile?")) {
+          const err = await deleteProfile(id);
+          if (err) console.error(err);
+          loadUsers();
+      }
+  };
+
+  const handleSyncLocal = async () => {
+      const { success, message } = await syncLocalProfilesToSupabase();
+      alert(message);
+      if (success) loadUsers();
+  };
 
   const handleAIGenerateDaily = async () => {
       setIsGeneratingAI(true);
@@ -477,9 +554,17 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
         {/* Warning Banner from Image */}
         <div className="flex items-center gap-4">
           {supabase ? (
-            <div className="hidden sm:flex bg-green-50 border border-green-100 p-3 px-4 rounded-2xl items-center gap-3 shadow-sm">
-              <Database className="w-4 h-4 text-green-600" />
-              <p className="text-[10px] font-bold text-green-800">Connected</p>
+            <div className="flex items-center gap-3">
+              <div className={`hidden sm:flex ${isAuth ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'} border p-3 px-4 rounded-2xl items-center gap-3 shadow-sm`}>
+                <div className={`w-2 h-2 ${isAuth ? 'bg-emerald-500' : 'bg-amber-500'} rounded-full animate-pulse`}></div>
+                <p className={`text-[10px] font-bold ${isAuth ? 'text-emerald-800' : 'text-amber-800'}`}>
+                  {isAuth ? `Authenticated: ${currentUser?.role || 'User'}` : 'Unauthenticated (Sign In Required)'}
+                </p>
+              </div>
+              <div className="hidden sm:flex bg-blue-50 border border-blue-100 p-3 px-4 rounded-2xl items-center gap-3 shadow-sm">
+                <Database className="w-4 h-4 text-blue-600" />
+                <p className="text-[10px] font-bold text-blue-800">Cloud Active</p>
+              </div>
             </div>
           ) : (
             <div className="bg-orange-50 border border-orange-100 p-3 px-4 rounded-2xl flex items-center gap-3 shadow-sm">
@@ -730,37 +815,56 @@ create policy "Admins view all attempts" on daily_attempts for select using (exi
       )}
 
       {activeTab === 'USER MANAGEMENT' && (
-        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm pt-4">
-             <table className="w-full text-left">
-                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
-                    <tr><th className="px-8 py-5">Identity Protocol</th><th className="px-8 py-5">Domain Role</th><th className="px-8 py-5">Verification Status</th><th className="px-8 py-5 text-right">Administrative Actions</th></tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                    {users.map((u) => (
-                        <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-8 py-6">
-                                <div className="flex flex-col"><span className="font-black text-slate-900">{u.full_name}</span><span className="text-[10px] font-bold text-slate-400 tracking-tight">{u.email}</span></div>
-                            </td>
-                            <td className="px-8 py-6"><span className="text-[10px] font-black uppercase text-slate-500 px-3 py-1 bg-slate-100 rounded-lg">{u.role}</span></td>
-                            <td className="px-8 py-6"><span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.status === 'approved' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{u.status}</span></td>
-                            <td className="px-8 py-6 text-right">
-                                <div className="flex justify-end gap-3">
-                                    {u.status === 'pending' && (
-                                        <button onClick={() => updateProfileStatus(u.id, 'approved')} className="p-2.5 text-green-600 bg-green-50 rounded-xl hover:scale-110 transition-transform" title="Approve"><CheckCircle2 className="w-4 h-4" /></button>
-                                    )}
-                                    {u.status === 'pending' && (
-                                        <button onClick={() => updateProfileStatus(u.id, 'rejected')} className="p-2.5 text-amber-600 bg-amber-50 rounded-xl hover:scale-110 transition-transform" title="Reject"><XCircle className="w-4 h-4" /></button>
-                                    )}
-                                    {u.status === 'approved' && (
-                                        <button onClick={() => updateProfileStatus(u.id, 'pending')} className="p-2.5 text-slate-400 bg-slate-50 rounded-xl hover:scale-110 transition-transform" title="Revoke Approval"><RefreshCw className="w-4 h-4" /></button>
-                                    )}
-                                    <button onClick={() => deleteProfile(u.id)} className="p-2.5 text-red-400 bg-red-50 rounded-xl hover:scale-110 transition-transform" title="Delete Profile"><Trash2 className="w-4 h-4" /></button>
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-             </table>
+        <div className="space-y-4">
+            <div className="flex justify-between items-center px-4">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Active Directory</h3>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={handleSyncLocal}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors"
+                    >
+                        <RefreshCw className="w-3 h-3" /> Sync Local Data
+                    </button>
+                    <button 
+                        onClick={loadUsers}
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-slate-100 transition-colors"
+                    >
+                        <RefreshCw className="w-3 h-3" /> Refresh
+                    </button>
+                </div>
+            </div>
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm pt-4">
+                 <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
+                        <tr><th className="px-8 py-5">Identity Protocol</th><th className="px-8 py-5">Domain Role</th><th className="px-8 py-5">Verification Status</th><th className="px-8 py-5 text-right">Administrative Actions</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                        {users.map((u) => (
+                            <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-8 py-6">
+                                    <div className="flex flex-col"><span className="font-black text-slate-900">{u.full_name}</span><span className="text-[10px] font-bold text-slate-400 tracking-tight">{u.email}</span></div>
+                                </td>
+                                <td className="px-8 py-6"><span className="text-[10px] font-black uppercase text-slate-500 px-3 py-1 bg-slate-100 rounded-lg">{u.role}</span></td>
+                                <td className="px-8 py-6"><span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.status === 'approved' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{u.status}</span></td>
+                                <td className="px-8 py-6 text-right">
+                                    <div className="flex justify-end gap-3">
+                                        {u.status === 'pending' && (
+                                            <button onClick={() => handleUpdateStatus(u.id, 'approved')} className="p-2.5 text-green-600 bg-green-50 rounded-xl hover:scale-110 transition-transform" title="Approve"><CheckCircle2 className="w-4 h-4" /></button>
+                                        )}
+                                        {u.status === 'pending' && (
+                                            <button onClick={() => handleUpdateStatus(u.id, 'rejected')} className="p-2.5 text-amber-600 bg-amber-50 rounded-xl hover:scale-110 transition-transform" title="Reject"><XCircle className="w-4 h-4" /></button>
+                                        )}
+                                        {u.status === 'approved' && (
+                                            <button onClick={() => handleUpdateStatus(u.id, 'pending')} className="p-2.5 text-slate-400 bg-slate-50 rounded-xl hover:scale-110 transition-transform" title="Revoke Approval"><RefreshCw className="w-4 h-4" /></button>
+                                        )}
+                                        <button onClick={() => handleDeleteProfile(u.id)} className="p-2.5 text-red-400 bg-red-50 rounded-xl hover:scale-110 transition-transform" title="Delete Profile"><Trash2 className="w-4 h-4" /></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                 </table>
+            </div>
         </div>
       )}
 

@@ -200,6 +200,20 @@ export const deleteProfile = async (userId: string) => {
   }
 };
 
+export const syncLocalProfilesToSupabase = async () => {
+  if (!supabase) return { success: false, message: "Supabase not configured." };
+  const localProfiles = getLocal('nexus_profiles');
+  if (localProfiles.length === 0) return { success: true, message: "No local profiles to sync." };
+  
+  try {
+    const { error } = await supabase.from('profiles').upsert(localProfiles, { onConflict: 'email' });
+    if (error) throw error;
+    return { success: true, message: `Successfully synced ${localProfiles.length} profiles.` };
+  } catch (e: any) {
+    return { success: false, message: e.message || "Sync failed." };
+  }
+};
+
 export const getDailyChallenge = async (date: string) => {
   if (!supabase) {
     const papers = getLocal('nexus_daily_challenges');
