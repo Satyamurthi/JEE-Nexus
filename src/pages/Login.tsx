@@ -197,10 +197,18 @@ const Login = () => {
           )}
         </div>
 
-        {/* Footer */}
-        <p className="mt-10 text-slate-400 font-bold text-xs tracking-tight">
-          New Aspirant? <Link to="/signup" className="text-indigo-600 hover:underline">Enroll Now</Link>
-        </p>
+          {/* Footer */}
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <p className="text-slate-400 font-bold text-xs tracking-tight">
+              New Aspirant? <Link to="/signup" className="text-indigo-600 hover:underline">Enroll Now</Link>
+            </p>
+            <button 
+              onClick={() => { setEmail('name@admin.com'); setPassword('admin123'); }}
+              className="text-[10px] font-black text-slate-300 hover:text-indigo-500 uppercase tracking-widest transition-colors"
+            >
+              System Admin Access (Demo)
+            </button>
+          </div>
       </div>
     </div>
   );

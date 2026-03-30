@@ -208,13 +208,31 @@ const Admin = () => {
 
   const [isUtilityOpen, setIsUtilityOpen] = useState(false);
   const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
-  const [signInEmail, setSignInEmail] = useState('name@admin.com');
+  const [signInEmail, setSignInEmail] = useState(() => {
+    const lp = localStorage.getItem('user_profile');
+    if (lp) {
+        try {
+            return JSON.parse(lp).email || 'name@admin.com';
+        } catch { return 'name@admin.com'; }
+    }
+    return 'name@admin.com';
+  });
   const [signInPassword, setSignInPassword] = useState('');
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [repairStatus, setRepairStatus] = useState<'idle' | 'running' | 'success'>('idle');
-  const [customUrl, setCustomUrl] = useState(localStorage.getItem('custom_supabase_url') || '');
-  const [customKey, setCustomKey] = useState(localStorage.getItem('custom_supabase_key') || '');
+  const [customUrl, setCustomUrl] = useState(() => {
+    try {
+      const config = JSON.parse(localStorage.getItem('custom_supabase_config') || '{}');
+      return config.url || '';
+    } catch { return ''; }
+  });
+  const [customKey, setCustomKey] = useState(() => {
+    try {
+      const config = JSON.parse(localStorage.getItem('custom_supabase_config') || '{}');
+      return config.key || '';
+    } catch { return ''; }
+  });
 
   const handleCloudSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -316,31 +334,47 @@ alter table public.profiles add column if not exists password text;
 alter table public.profiles add column if not exists status text default 'pending' check (status in ('pending', 'approved', 'rejected'));
 alter table public.profiles add column if not exists role text default 'student' check (role in ('student', 'admin'));
 
--- 2. ADMIN PROVISIONING
--- Creates name@admin.com with password admin123
-DO $$
-DECLARE
-  new_user_id UUID := gen_random_uuid();
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
-    INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-    VALUES ('00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', 'name@admin.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "System Admin"}', now(), now());
-  END IF;
-  
-  -- Ensure admin exists in profiles with correct password and status
-  INSERT INTO public.profiles (id, email, full_name, role, status, password)
-  SELECT id, email, 'System Admin', 'admin', 'approved', 'admin123' FROM auth.users WHERE email = 'name@admin.com'
-  ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
-END $$;
+  -- 2. ADMIN PROVISIONING
+  -- Creates name@admin.com and satyu000@gmail.com with password admin123
+  DO $$
+  DECLARE
+    new_user_id UUID := gen_random_uuid();
+    satyu_id UUID := gen_random_uuid();
+  BEGIN
+    -- Provision name@admin.com
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'name@admin.com') THEN
+      INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      VALUES ('00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', 'name@admin.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "System Admin"}', now(), now());
+    END IF;
+    
+    -- Provision satyu000@gmail.com (Primary Admin)
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'satyu000@gmail.com') THEN
+      INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      VALUES ('00000000-0000-0000-0000-000000000000', satyu_id, 'authenticated', 'authenticated', 'satyu000@gmail.com', crypt('1@Vishruth', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name": "Satyu Admin"}', now(), now());
+    ELSE
+      -- Update password if user already exists
+      UPDATE auth.users SET encrypted_password = crypt('1@Vishruth', gen_salt('bf')) WHERE email = 'satyu000@gmail.com';
+    END IF;
+    
+    -- Ensure admins exist in profiles with correct password and status
+    INSERT INTO public.profiles (id, email, full_name, role, status, password)
+    SELECT id, email, 'System Admin', 'admin', 'approved', 'admin123' FROM auth.users WHERE email = 'name@admin.com'
+    ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = 'admin123';
+
+    INSERT INTO public.profiles (id, email, full_name, role, status, password)
+    SELECT id, email, 'Satyu Admin', 'admin', 'approved', '1@Vishruth' FROM auth.users WHERE email = 'satyu000@gmail.com'
+    ON CONFLICT (email) DO UPDATE SET role = 'admin', status = 'approved', password = '1@Vishruth';
+  END $$;
 
 -- 2.6 ADMIN CHECK FUNCTION
 -- Security definer allows bypassing RLS for the check itself
-CREATE OR REPLACE FUNCTION public.is_admin()
+-- We use a dedicated function to avoid recursion in RLS policies
+CREATE OR REPLACE FUNCTION public.is_admin(user_id uuid)
 RETURNS boolean AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM public.profiles
-    WHERE id = auth.uid()
+    WHERE id = user_id
     AND role = 'admin'
   );
 END;
@@ -366,9 +400,9 @@ create policy "Public profiles are viewable by everyone" on profiles for select 
 drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 drop policy if exists "Admins can update all profiles" on profiles;
-create policy "Admins can update all profiles" on profiles for update using (public.is_admin());
+create policy "Admins can update all profiles" on profiles for update using (public.is_admin(auth.uid()));
 drop policy if exists "Admins can delete profiles" on profiles;
-create policy "Admins can delete profiles" on profiles for delete using (public.is_admin());
+create policy "Admins can delete profiles" on profiles for delete using (public.is_admin(auth.uid()));
 drop policy if exists "Anyone can insert profiles" on profiles;
 create policy "Anyone can insert profiles" on profiles for insert with check (true);
 
@@ -396,7 +430,7 @@ create policy "Users can insert own attempts" on daily_attempts for insert with 
 drop policy if exists "Users can view own attempts" on daily_attempts;
 create policy "Users can view own attempts" on daily_attempts for select using (auth.uid() = user_id);
 drop policy if exists "Admins view all attempts" on daily_attempts;
-create policy "Admins view all attempts" on daily_attempts for select using (public.is_admin());`;
+create policy "Admins view all attempts" on daily_attempts for select using (public.is_admin(auth.uid()));`;
 
   const loadUsers = useCallback(async () => {
     const { data } = await getAllProfiles();
@@ -432,21 +466,33 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
 
   const handleUpdateStatus = async (id: string, status: string) => {
       const err = await updateProfileStatus(id, status);
-      if (err) console.error(err);
-      loadUsers();
+      if (err) {
+          console.error("Update status error:", err);
+          setToast({ message: err, type: 'error' });
+      } else {
+          setToast({ message: `Profile status updated to ${status}`, type: 'success' });
+          loadUsers();
+      }
   };
 
   const handleDeleteProfile = async (id: string) => {
       if (window.confirm("Are you sure you want to delete this profile?")) {
           const err = await deleteProfile(id);
-          if (err) console.error(err);
-          loadUsers();
+          if (err) {
+              console.error("Delete profile error:", err);
+              setToast({ message: err, type: 'error' });
+          } else {
+              setToast({ message: "Profile deleted successfully", type: 'success' });
+              loadUsers();
+          }
       }
   };
 
   const handleSyncLocal = async () => {
+      setIsSyncing(true);
       const { success, message } = await syncLocalProfilesToSupabase();
-      alert(message);
+      setToast({ message, type: success ? 'success' : 'error' });
+      setIsSyncing(false);
       if (success) loadUsers();
   };
 
@@ -723,7 +769,7 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
               >
                 <div className={`w-2 h-2 ${isAuth ? 'bg-emerald-500' : isLocalAuth ? 'bg-blue-500' : 'bg-amber-500'} rounded-full ${isAuth ? 'animate-pulse' : ''}`}></div>
                 <p className={`text-[10px] font-bold ${isAuth ? 'text-emerald-800' : isLocalAuth ? 'text-blue-800' : 'text-amber-800'}`}>
-                  {isAuth ? `Cloud Auth: ${currentUser?.role || 'User'}` : isLocalAuth ? `Local Auth: ${currentUser?.role || 'Admin'} (Sign In to Cloud)` : 'Unauthenticated (Click to Sign In)'}
+                  {isAuth ? `Cloud Auth: ${currentUser?.email || 'User'}` : isLocalAuth ? `Local Auth: ${currentUser?.email || 'Admin'} (Sign In to Cloud)` : 'Unauthenticated (Click to Sign In)'}
                 </p>
               </button>
               <div className="hidden sm:flex bg-blue-50 border border-blue-100 p-3 px-4 rounded-2xl items-center gap-3 shadow-sm">

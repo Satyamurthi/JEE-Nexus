@@ -176,16 +176,29 @@ export const updateProfileStatus = async (userId: string, status: string) => {
     setLocal('nexus_profiles', profiles.map((p: any) => p.id === userId ? { ...p, status } : p));
     return null;
   }
+
   try {
+    // Check for session first
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      // Fallback to local storage if no cloud session
+      const profiles = getLocal('nexus_profiles');
+      const profile = profiles.find((p: any) => p.id === userId);
+      if (profile) {
+        setLocal('nexus_profiles', profiles.map((p: any) => p.id === userId ? { ...p, status } : p));
+        return null;
+      }
+      return "Cloud session required for cloud updates, and profile not found in local directory.";
+    }
+
     const { data, error } = await supabase.from('profiles').update({ status }).eq('id', userId).select();
     if (error) {
       console.error("Supabase update error:", error);
       return error.message;
     }
     if (!data || data.length === 0) {
-      const { data: session } = await supabase.auth.getSession();
-      console.warn("Update returned no data. Session:", session);
-      return "Update failed: Permission denied or Profile not found.";
+      return "Update failed: Permission denied or Profile not found in Cloud.";
     }
     return null;
   } catch (e: any) {
@@ -199,7 +212,17 @@ export const deleteProfile = async (userId: string) => {
     setLocal('nexus_profiles', profiles.filter((p: any) => p.id !== userId));
     return null;
   }
+
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      // Fallback to local storage
+      const profiles = getLocal('nexus_profiles');
+      setLocal('nexus_profiles', profiles.filter((p: any) => p.id !== userId));
+      return null;
+    }
+
     const { error } = await supabase.from('profiles').delete().eq('id', userId);
     if (error) {
       console.error("Supabase delete error:", error);
@@ -207,7 +230,7 @@ export const deleteProfile = async (userId: string) => {
     }
     return null;
   } catch (e: any) {
-    return e.message;
+    return e.message || "Network error during profile deletion.";
   }
 };
 
