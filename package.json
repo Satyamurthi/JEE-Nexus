@@ -16,8 +16,7 @@
     "lucide-react": "0.562.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-is": "^19.2.3",
-    "react-router": "^6.29.0",
+    "react-is": "19.2.3",
     "react-router-dom": "^6.29.0",
     "recharts": "^2.15.0"
   },
@@ -34,5 +33,10 @@
     "tailwindcss": "^4.2.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-is": "19.2.3"
   }
 }

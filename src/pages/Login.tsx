@@ -52,6 +52,13 @@ const Login = () => {
         return;
       }
 
+      // Check for approval status
+      if (user.status !== 'approved') {
+        setError("Your account is pending approval from the administrator. Please check back later.");
+        setIsLoading(false);
+        return;
+      }
+
       // In this version, we'll allow access if the user exists in either directory.
       // For a real production app, we would use supabase.auth.signInWithPassword here.
       localStorage.setItem('user_profile', JSON.stringify(user));

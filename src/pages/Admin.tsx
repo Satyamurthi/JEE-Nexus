@@ -212,6 +212,8 @@ drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 drop policy if exists "Admins can update all profiles" on profiles;
 create policy "Admins can update all profiles" on profiles for update using (exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+drop policy if exists "Anyone can insert profiles" on profiles;
+create policy "Anyone can insert profiles" on profiles for insert with check (true);
 
 -- 4. APP TABLES
 create table if not exists public.questions (id uuid default gen_random_uuid() primary key, subject text not null, chapter text, type text, difficulty text, statement text not null, options jsonb, "correctAnswer" text not null, solution text, explanation text, concept text, "markingScheme" jsonb default '{"positive": 4, "negative": 1}', created_at timestamp with time zone default timezone('utc'::text, now()) not null);

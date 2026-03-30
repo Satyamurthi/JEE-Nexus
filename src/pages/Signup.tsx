@@ -29,12 +29,18 @@ const Signup = () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     try {
+      // Generate a proper UUID for Supabase compatibility
+      const uuid = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+
       const newUser = {
-        id: Math.random().toString(36).substring(2, 15),
+        id: uuid,
         email: email.toLowerCase(),
         full_name: fullName,
         role: 'student',
-        status: 'approved', // Auto-approve for demo purposes
+        status: 'pending', // Set to pending for admin approval
         created_at: new Date().toISOString()
       };
 
@@ -81,9 +87,9 @@ const Signup = () => {
           <div className="bg-emerald-100 p-6 rounded-full">
             <CheckCircle2 className="w-16 h-16 text-emerald-600" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Enrollment Successful</h1>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Enrollment Initialized</h1>
           <p className="text-slate-500 font-medium max-w-xs">
-            Your strategic profile has been initialized. Redirecting to login portal...
+            Your strategic profile has been created and is awaiting administrator approval. Redirecting to login portal...
           </p>
         </div>
       </div>
