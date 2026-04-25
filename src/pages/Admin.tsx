@@ -429,7 +429,11 @@ create policy "Admins view all attempts" on daily_attempts for select using (pub
     const { data, error } = await getAllProfiles();
     if (error) {
         console.error("Load users failed:", error);
-        setToast({ message: typeof error === 'string' ? error : (error as any).message || "Failed to load users", type: 'error' });
+        let errorMsg = typeof error === 'string' ? error : (error as any).message || "Failed to load users";
+        if (errorMsg.includes("Failed to fetch") || errorMsg.includes("NetworkError")) {
+            errorMsg = "Database Connection Failed. Please check if your Supabase URL is correct and CORS is enabled for this app in your Supabase dashboard.";
+        }
+        setToast({ message: errorMsg, type: 'error' });
     }
     setUsers(data || []);
   }, []);
