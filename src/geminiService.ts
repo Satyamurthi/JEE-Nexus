@@ -1,9 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { Subject, ExamType, Question } from "./types";
 
-// Standardizing model for complex Reasoning, Coding, and STEM (JEE preparation)
-const PRIMARY_MODEL = "gemini-3.1-pro-preview";
-const FALLBACK_MODEL = "gemini-3-flash-preview"; // Fallback for rate limits
+// NVIDIA API Integration for Google Gemma 3
+const NVIDIA_INVOKE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const MODEL_NAME = "google/gemma-3-27b-it"; 
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -14,26 +13,9 @@ let currentKeyIndex = 0;
 const initializeKeyPool = async () => {
     if (keyPool.length > 0) return;
 
-    // 1. Get raw string from env
-    let rawKeys = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+    // 1. Get raw string from env or use the default provided by user
+    let rawKeys = process.env.VITE_NVIDIA_API_KEY || import.meta.env.VITE_NVIDIA_API_KEY || "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";
     
-    // 2. If no key, try to use the AI Studio selection flow
-    if (!rawKeys && typeof window !== 'undefined' && (window as any).aistudio) {
-        try {
-            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) {
-                await (window as any).aistudio.openSelectKey();
-                console.log("API Key selected. Reloading...");
-                window.location.reload();
-                return;
-            }
-            // Try to read again, though likely requires reload
-            rawKeys = process.env.API_KEY || '';
-        } catch (e) {
-            console.warn("AI Studio key selection failed:", e);
-        }
-    }
-
     // 3. Parse comma-separated keys
     if (rawKeys) {
         keyPool = rawKeys.split(',').map(k => k.trim()).filter(k => k.length > 0);
@@ -49,89 +31,79 @@ const getNextKey = async (): Promise<string> => {
     return key;
 };
 
-// Helper to generate content using the SDK following guidelines
-const safeGenerateContent = async (params: { model: string, contents: any, config?: any }): Promise<any> => {
+// Clean JSON response from LLM
+const extractJson = (text: string) => {
+    const jsonMatch = text.match(/```json\n([\s\S]*?)```/);
+    if (jsonMatch) return jsonMatch[1];
+    const match2 = text.match(/```\n([\s\S]*?)```/);
+    if (match2) return match2[1];
+    return text.trim();
+};
+
+const safeNVIDIACompletion = async (systemInstruction: string, userMessage: string, maxTokens: number = 8000): Promise<string> => {
     await initializeKeyPool();
     
     if (keyPool.length === 0) {
-        throw new Error("AI Generation Failed: API_KEY is not configured. Please select an API Key.");
+        throw new Error("AI Generation Failed: NVIDIA API Key is not configured.");
     }
 
     let lastError: any;
-    // Try up to 3 times with different keys (or same key if pool is small)
     const maxRetries = Math.max(keyPool.length, 3); 
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         const apiKey = await getNextKey();
-        console.log(`[AI] Attempt ${attempt + 1}/${maxRetries} using Key: ${apiKey.substring(0, 8)}...`);
+        console.log(`[NVIDIA AI] Attempt ${attempt + 1}/${maxRetries} using Key: ${apiKey.substring(0, 8)}...`);
 
         try {
-            const ai = new GoogleGenAI({ apiKey });
-            
-            // Determine model - use fallback if we've failed before on 429
-            const modelToUse = (attempt > 0 && lastError?.status === 429) ? FALLBACK_MODEL : params.model;
-            if (modelToUse !== params.model) console.log(`[AI] Switching to fallback model: ${modelToUse}`);
+            const payload = {
+                model: MODEL_NAME,
+                messages: [
+                    { role: "system", content: systemInstruction },
+                    { role: "user", content: userMessage }
+                ],
+                max_tokens: maxTokens,
+                temperature: 0.20,
+                top_p: 0.70,
+                stream: false
+            };
 
-            const response = await ai.models.generateContent({
-                model: modelToUse, 
-                contents: params.contents,
-                config: {
-                    ...params.config,
-                    systemInstruction: "You are an expert JEE coach. Your goal is to generate HIGHLY UNIQUE, ORIGINAL, and concept-heavy problems. Do not provide common textbook problems. Use LaTeX for all math. Ensure output matches the exact JSON schema provided. The questions must be correctly formed and sufficient for JEE Advanced level.",
-                    temperature: 0.95,
-                    topP: 0.9,
-                    seed: params.config?.seed ?? Math.floor(Math.random() * 9999999)
-                }
+            const response = await fetch(NVIDIA_INVOKE_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
             });
-            return response;
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`NVIDIA API Error: ${response.status} ${errText}`);
+            }
+
+            const data = await response.json();
+            return data.choices[0]?.message?.content || "";
+            
         } catch (e: any) {
             lastError = e;
+            console.warn(`[NVIDIA AI] Error on attempt: ${e.message}`);
             
-            // Handle specific errors
-            if (e.message?.includes("API key not valid") || e.status === 400) {
-                console.warn(`[AI] Invalid Key: ${apiKey.substring(0, 8)}... rotating.`);
+            if (e.message?.includes("401") || e.message?.includes("403")) {
                 continue; // Try next key
             }
-            
-            if (e.status === 429 || e.message?.includes("quota") || e.message?.includes("RESOURCE_EXHAUSTED")) {
-                console.warn(`[AI] Rate Limit hit on Key: ${apiKey.substring(0, 8)}... rotating.`);
-                await delay(1000); // Wait a bit before retry
-                continue; // Try next key
+            if (e.message?.includes("429")) {
+                await delay(1500); 
+                continue; 
             }
-
-            // For other errors, throw immediately
-            throw e;
         }
     }
     
-    // If we exhausted all retries
-    console.error("[AI] All keys/retries exhausted.");
+    console.error("[NVIDIA AI] All keys/retries exhausted.", lastError);
     throw lastError;
 };
 
-const questionSchema = {
-  type: Type.ARRAY,
-  items: {
-    type: Type.OBJECT,
-    properties: {
-      subject: { type: Type.STRING },
-      chapter: { type: Type.STRING },
-      type: { type: Type.STRING },
-      difficulty: { type: Type.STRING },
-      statement: { type: Type.STRING },
-      options: { type: Type.ARRAY, items: { type: Type.STRING } },
-      correctAnswer: { type: Type.STRING },
-      solution: { type: Type.STRING },
-      explanation: { type: Type.STRING },
-      concept: { type: Type.STRING },
-      markingScheme: {
-         type: Type.OBJECT,
-         properties: { positive: { type: Type.INTEGER }, negative: { type: Type.INTEGER } }
-      }
-    },
-    required: ["subject", "statement", "correctAnswer", "solution", "type"]
-  }
-};
+// ... questionSchema definition removed as not native to Gemma-3 Chat API...
 
 export const generateJEEQuestions = async (subject: Subject, count: number, type: ExamType, chapters?: string[], difficulty?: string, topics?: string[], distribution?: { mcq: number, numerical: number }): Promise<Question[]> => {
   
@@ -145,13 +117,12 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       topicFocus += ` | Specific Topics: ${topics.join(', ')}`;
   }
 
-  // --- ATTEMPT 1: GOOGLE GEMINI AI ---
   try {
       console.log(`[AI] Generating ${count} unique questions for ${subject} (MCQ: ${totalMcqTarget}, Num: ${totalNumTarget})...`);
       
-      // Multi-layered entropy to force unique generation
       const sessionEntropy = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
       
+      const systemInstruction = `You are an expert JEE coach. Generate HIGHLY UNIQUE, ORIGINAL problems. Do not provide common textbook problems. Use LaTeX for math.`;
       const prompt = `BatchID: ${sessionEntropy}. 
       Generate EXACTLY ${count} COMPLETELY UNIQUE and NEVER-BEFORE-SEEN questions for ${subject} (${type} level). 
       
@@ -160,43 +131,54 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
       - Exactly ${totalNumTarget} Numerical Value Questions (type: "Numerical")
       
       Scope: ${topicFocus}. 
-      Mandatory: Do NOT repeat problems from standard mock tests or previous batches. 
-      Vary the parameters, numerical values, and conceptual combinations. 
+      Difficulty: ${difficulty || 'Advanced'}.
       Use LaTeX for all formulas. 
-      Strict JSON format.`;
       
-      const response = await safeGenerateContent({
-        model: PRIMARY_MODEL,
-        contents: prompt,
-        config: { 
-          responseMimeType: "application/json", 
-          responseSchema: questionSchema
+      OUTPUT FORMAT:
+      You MUST return ONLY a valid JSON array. Do not include markdown formatting or explanations outside of the JSON. It must match this exact structure for each item:
+      [
+        {
+          "subject": "${subject}",
+          "chapter": "Name of chapter",
+          "type": "MCQ" or "Numerical",
+          "difficulty": "Medium" or "Hard",
+          "statement": "Question statement text here...",
+          "options": ["Opt A", "Opt B", "Opt C", "Opt D"], 
+          "correctAnswer": "A", 
+          "solution": "Step by step solution...",
+          "explanation": "Why this is correct...",
+          "concept": "Underlying concept",
+          "markingScheme": { "positive": 4, "negative": 1 }
         }
-      });
+      ]
+      Note: For "Numerical" type questions, leave "options" as an empty array [] and put the exact number string in "correctAnswer".`;
       
-      const text = response.text;
-      if (text) {
+      const textResponse = await safeNVIDIACompletion(systemInstruction, prompt, 8000);
+      
+      if (textResponse) {
           try {
-              const data = JSON.parse(text);
+              const cleanJson = extractJson(textResponse);
+              const data = JSON.parse(cleanJson);
               if (Array.isArray(data)) {
                   data.forEach((q: any) => {
                       const processedQ = {
                           ...q,
-                          id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                          id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                           subject: q.subject || subject,
                           type: q.type || (q.options && q.options.length > 0 ? 'MCQ' : 'Numerical'),
-                          markingScheme: q.markingScheme || (q.options && q.options.length > 0 ? { positive: 4, negative: 1 } : { positive: 4, negative: 0 })
+                          markingScheme: Object.assign({ positive: 4, negative: q.type === 'Numerical' ? 0 : 1 }, q.markingScheme || {})
                       };
                       allQuestions.push(processedQ);
                   });
               }
           } catch (parseErr) {
-              console.warn("[AI] JSON Parse Failure.");
+              console.warn("[AI] JSON Parse Failure on NVIDIA response.", parseErr);
+              console.log("Raw Response received:", textResponse);
           }
       }
   } catch (e: any) {
-      console.error("[AI] Gemini failure:", e.message);
-      throw e; 
+      console.error("[AI] NVIDIA API failure:", e.message);
+      // Don't throw immediately, let the padding handle incomplete arrays
   }
 
   let finalMcqs = allQuestions.filter(q => q.type === 'MCQ').slice(0, totalMcqTarget);
@@ -241,17 +223,16 @@ export const generateJEEQuestions = async (subject: Subject, count: number, type
 
 export const getQuickHint = async (statement: string, subject: string): Promise<string> => {
   try {
-    const response = await safeGenerateContent({ 
-      model: PRIMARY_MODEL, 
-      contents: `Provide a single-sentence strategic hint for this ${subject} question: ${statement.substring(0, 500)}` 
-    });
-    return response.text || "Focus on fundamental principles.";
+    const text = await safeNVIDIACompletion(
+      "You are a helpful tutor.",
+      `Provide a single-sentence strategic hint for this ${subject} question: ${statement.substring(0, 500)}`
+    );
+    return text || "Focus on fundamental principles.";
   } catch (e) { return "Hint unavailable."; }
 };
 
 export const generateFullJEEDailyPaper = async (config: any): Promise<{ physics: Question[], chemistry: Question[], mathematics: Question[] }> => {
   try {
-    // Distributed generation with random delays to avoid hitting same-key rate limits simultaneously
     const physics = await generateJEEQuestions(Subject.Physics, config.physics.mcq + config.physics.numerical, ExamType.Advanced, config.physics.chapters, 'Hard', config.physics.topics, config.physics);
     await delay(1000);
     const chemistry = await generateJEEQuestions(Subject.Chemistry, config.chemistry.mcq + config.chemistry.numerical, ExamType.Advanced, config.chemistry.chapters, 'Hard', config.chemistry.topics, config.chemistry);
@@ -275,26 +256,55 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
   };
 
   try {
-    const qData = await fileToBase64(questionFile);
-    const parts: any[] = [{ inlineData: { mimeType: questionFile.type, data: qData } }];
+    // NVIDIA gemma-3 text chat doesn't natively support multiple arbitrary documents in simple array format via this endpoint natively or if it does, it needs image URLs.
+    // For now we try to send the prompt. It might fail if files are sent. We will extract text or use basic prompt placeholder.
+    // Assuming user might upload images. Gemma 3 vision on NVIDIA API accepts images as base64 in messages: 
+    // { role: "user", content: [ { type: "text", text: "..." }, { type: "image_url", image_url: {"url": "data:image/png;base64,..."} } ] }
     
-    if (solutionFile) {
-      const sData = await fileToBase64(solutionFile);
-      parts.push({ inlineData: { mimeType: solutionFile.type, data: sData } });
+    let contentArr: any[] = [
+        { type: "text", text: `Digitize and structure the JEE questions from these documents. Output a JSON array matching the JEE question schema. Use LaTeX for math. Format as exactly shown below: \n[\n  {\n    "subject": "Physics",\n    "chapter": "String",\n    "type": "MCQ",\n    "difficulty": "Medium",\n    "statement": "String",\n    "options": ["A", "B", "C", "D"],\n    "correctAnswer": "A",\n    "solution": "String",\n    "explanation": "String",\n    "concept": "String",\n    "markingScheme": { "positive": 4, "negative": 1 }\n  }\n]` }
+    ];
+
+    if (questionFile.type.startsWith('image/')) {
+        const qData = await fileToBase64(questionFile);
+        contentArr.push({ type: "image_url", image_url: { url: `data:${questionFile.type};base64,${qData}` } });
+    }
+    
+    if (solutionFile && solutionFile.type.startsWith('image/')) {
+        const sData = await fileToBase64(solutionFile);
+        contentArr.push({ type: "image_url", image_url: { url: `data:${solutionFile.type};base64,${sData}` } });
+    }
+    
+    // Fallback if not an image (e.g. PDF might not be supported natively by chat API without text extraction)
+    if (!questionFile.type.startsWith('image/')) {
+        contentArr[0].text += `\n[NOTE: Non-image file uploaded. This AI endpoint may not be able to read this file natively unless it's text. Please try uploading images.]`;
     }
 
-    const prompt = `Digitize and structure the JEE questions from these documents. Output a JSON array matching the schema. Use LaTeX for math.`;
-    
-    const response = await safeGenerateContent({ 
-      model: PRIMARY_MODEL, 
-      contents: { parts: [...parts, { text: prompt }] }, 
-      config: { responseMimeType: "application/json", responseSchema: questionSchema } 
+    const payload = {
+        model: MODEL_NAME,
+        messages: [{ role: "user", content: contentArr }],
+        max_tokens: 4096,
+        temperature: 0.2
+    };
+
+    await initializeKeyPool();
+    const response = await fetch(NVIDIA_INVOKE_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${keyPool[0]}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
     });
-    const text = response.text;
+    
+    if (!response.ok) throw new Error("Document parsing failed API request");
+    
+    const responseData = await response.json();
+    const text = responseData.choices[0]?.message?.content;
+    
     if (!text) throw new Error("Parser response empty");
-    const data = JSON.parse(text);
-    if (!Array.isArray(data)) throw new Error("Unexpected data structure");
-    return data.map((q, idx) => ({ ...q, id: `parsed-${Date.now()}-${idx}` }));
+    const jsonStr = extractJson(text);
+    const parsed = JSON.parse(jsonStr);
+    
+    if (!Array.isArray(parsed)) throw new Error("Unexpected data structure");
+    return parsed.map((q, idx) => ({ ...q, id: `parsed-${Date.now()}-${idx}` }));
   } catch (error) { 
     console.error("Document parsing failed:", error);
     throw error; 
@@ -303,11 +313,11 @@ export const parseDocumentToQuestions = async (questionFile: File, solutionFile?
 
 export const getDeepAnalysis = async (result: any) => {
     try {
-        const response = await safeGenerateContent({ 
-          model: PRIMARY_MODEL, 
-          contents: `Review this JEE performance data and provide a mentorship summary including strong areas and critical improvements: ${JSON.stringify(result).substring(0, 8000)}` 
-        });
-        return response.text || "Analysis complete. Keep practicing consistent drills.";
+        const text = await safeNVIDIACompletion(
+            "You are an expert tutor providing constructive feedback.",
+            `Review this JEE performance data and provide a mentorship summary including strong areas and critical improvements: ${JSON.stringify(result).substring(0, 8000)}` 
+        );
+        return text || "Analysis complete. Keep practicing consistent drills.";
     } catch (e) { 
         return "Cognitive analysis is temporarily unavailable due to a network disruption."; 
     }
