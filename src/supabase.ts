@@ -27,8 +27,18 @@ const getCustomConfig = () => {
 };
 
 const customConfig = getCustomConfig();
-const supabaseUrl = customConfig.url || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL') || PROVIDED_URL;
-const supabaseAnonKey = customConfig.key || getEnv('SUPABASE_ANON_KEY') || getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY') || PROVIDED_KEY;
+let supabaseUrl = customConfig.url || getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL') || PROVIDED_URL;
+let supabaseAnonKey = customConfig.key || getEnv('SUPABASE_ANON_KEY') || getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY') || PROVIDED_KEY;
+
+if (supabaseUrl) {
+  supabaseUrl = supabaseUrl.trim().replace(/\.\.co$/, '.supabase.co').replace(/\.supabase\.supabase\.co$/, '.supabase.co');
+  if (!supabaseUrl.startsWith('http')) {
+    supabaseUrl = `https://${supabaseUrl}`;
+  }
+}
+if (supabaseAnonKey) {
+    supabaseAnonKey = supabaseAnonKey.trim();
+}
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
   ? createClient(supabaseUrl, supabaseAnonKey) 
